@@ -1,8 +1,21 @@
+using ctp_api.Middleware;
+using DotNetEnv;
+
 var builder = WebApplication.CreateBuilder(args);
 
-// Add services to the container.
-// Learn more about configuring OpenAPI at https://aka.ms/aspnet/openapi
+Env.Load();
+builder.Configuration.AddEnvironmentVariables();
 builder.Services.AddOpenApi();
+
+var authUri = builder.Configuration["AuthServiceURL"];
+if (string.IsNullOrEmpty(authUri))
+{
+    throw new InvalidOperationException("AuthServiceURL is not configured. Please set it in the .env file.");
+}
+builder.Services.AddHttpClient("AuthService", client =>
+{
+    client.BaseAddress = new Uri(authUri);
+});
 
 var app = builder.Build();
 
@@ -11,31 +24,9 @@ if (app.Environment.IsDevelopment())
 {
     app.MapOpenApi();
 }
-
+app.UseApiKeyMiddleware();
 app.UseHttpsRedirection();
 
-var summaries = new[]
-{
-    "Freezing", "Bracing", "Chilly", "Cool", "Mild", "Warm", "Balmy", "Hot", "Sweltering", "Scorching"
-};
 
-app.MapGet("/weatherforecast", () =>
-    {
-        var forecast = Enumerable.Range(1, 5).Select(index =>
-                new WeatherForecast
-                (
-                    DateOnly.FromDateTime(DateTime.Now.AddDays(index)),
-                    Random.Shared.Next(-20, 55),
-                    summaries[Random.Shared.Next(summaries.Length)]
-                ))
-            .ToArray();
-        return forecast;
-    })
-    .WithName("GetWeatherForecast");
 
 app.Run();
-
-record WeatherForecast(DateOnly Date, int TemperatureC, string? Summary)
-{
-    public int TemperatureF => 32 + (int)(TemperatureC / 0.5556);
-}
