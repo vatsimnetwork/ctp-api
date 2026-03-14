@@ -42,6 +42,11 @@ ConnectionStrings__DefaultConnection=Host=postgres;Port=5432;Database=ctp_api_db
 docker compose up --build
 ```
 
+Once the database is ready, navigate to the `ctp-api/Database` folder and run the following commmand to initialise the database schema:
+```bash
+cat database-init.sql | docker exec -i ctp-api-postgres-1 psql -h localhost -U [USERNAME] -f-
+```
+
 The API will be available at `http://localhost:8080`.
 
 ### Locally (without Docker)
