@@ -2,6 +2,8 @@
 Microsoft Visual Studio Solution File, Format Version 12.00
 Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "ctp-api", "ctp-api\ctp-api.csproj", "{048070FC-246E-43E4-82DF-72476F3C5107}"
 EndProject
+Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "CTPSimulator", "..\ctp-simulator\CTPSimulator\CTPSimulator.csproj", "{A4AF8186-D561-472D-BC76-2A0A00347D14}"
+EndProject
 Global
 	GlobalSection(SolutionConfigurationPlatforms) = preSolution
 		Debug|Any CPU = Debug|Any CPU
@@ -12,5 +14,9 @@ Global
 		{048070FC-246E-43E4-82DF-72476F3C5107}.Debug|Any CPU.Build.0 = Debug|Any CPU
 		{048070FC-246E-43E4-82DF-72476F3C5107}.Release|Any CPU.ActiveCfg = Release|Any CPU
 		{048070FC-246E-43E4-82DF-72476F3C5107}.Release|Any CPU.Build.0 = Release|Any CPU
+		{A4AF8186-D561-472D-BC76-2A0A00347D14}.Debug|Any CPU.ActiveCfg = Debug|Any CPU
+		{A4AF8186-D561-472D-BC76-2A0A00347D14}.Debug|Any CPU.Build.0 = Debug|Any CPU
+		{A4AF8186-D561-472D-BC76-2A0A00347D14}.Release|Any CPU.ActiveCfg = Release|Any CPU
+		{A4AF8186-D561-472D-BC76-2A0A00347D14}.Release|Any CPU.Build.0 = Release|Any CPU
 	EndGlobalSection
 EndGlobal
