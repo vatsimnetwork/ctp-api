@@ -20,13 +20,13 @@
     </ItemGroup>
 
     <ItemGroup>
-      <Reference Include="Microsoft.EntityFrameworkCore">
-        <HintPath>..\..\..\..\.nuget\packages\microsoft.entityframeworkcore\10.0.4\lib\net10.0\Microsoft.EntityFrameworkCore.dll</HintPath>
-      </Reference>
+      <PackageReference Include="Microsoft.EntityFrameworkCore" Version="10.0.4" />
+      <PackageReference Include="Microsoft.EntityFrameworkCore.Design" Version="10.0.4" />
+      <PackageReference Include="Npgsql.EntityFrameworkCore.PostgreSQL" Version="10.0.0" />
     </ItemGroup>
 
     <ItemGroup>
-      <ProjectReference Include="..\..\ctp-simulator\CTPSimulator\CTPSimulator.csproj" />
+      <ProjectReference Include="..\ctp-simulator\CTPSimulator.csproj" />
     </ItemGroup>
 
 </Project>
