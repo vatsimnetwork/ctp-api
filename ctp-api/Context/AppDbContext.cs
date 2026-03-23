@@ -1,6 +1,7 @@
+using CTPSimulator;
 using Microsoft.EntityFrameworkCore;
 
-namespace CTPSimulator.Context;
+namespace ctp_api.Context;
 
 public class AppDbContext : DbContext
 {

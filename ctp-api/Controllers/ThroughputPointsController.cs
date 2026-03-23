@@ -1,4 +1,4 @@
-using CTPSimulator.Context;
+using ctp_api.Context;
 using Microsoft.AspNetCore.Mvc;
 using Microsoft.EntityFrameworkCore;
 

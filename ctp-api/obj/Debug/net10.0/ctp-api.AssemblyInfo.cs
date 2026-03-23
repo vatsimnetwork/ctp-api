@@ -13,7 +13,7 @@ using System.Reflection;
 [assembly: System.Reflection.AssemblyCompanyAttribute("ctp-api")]
 [assembly: System.Reflection.AssemblyConfigurationAttribute("Debug")]
 [assembly: System.Reflection.AssemblyFileVersionAttribute("1.0.0.0")]
-[assembly: System.Reflection.AssemblyInformationalVersionAttribute("1.0.0+0b49ad822e65ba7cf81d74dc1632fd25ebd03f6e")]
+[assembly: System.Reflection.AssemblyInformationalVersionAttribute("1.0.0+2962587251d9045df7ab01a63fdee7e40087c43d")]
 [assembly: System.Reflection.AssemblyProductAttribute("ctp-api")]
 [assembly: System.Reflection.AssemblyTitleAttribute("ctp-api")]
 [assembly: System.Reflection.AssemblyVersionAttribute("1.0.0.0")]
