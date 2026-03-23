@@ -23,7 +23,9 @@ public class ApiKeyMiddleware
         }   
 
         var client = _httpClientFactory.CreateClient("AuthService");
-        var response = await client.GetAsync($"/validate?apiKey={extractedApiKey}"); //TODO Change to the actuall endpoint of the auth service later when Mattis has implemented it
+        var request = new HttpRequestMessage(HttpMethod.Get, "/internal/apikey/validate");
+        request.Headers.Add("X-API-Key", extractedApiKey.ToString());
+        var response = await client.SendAsync(request);
 
         if (!response.IsSuccessStatusCode)
         {

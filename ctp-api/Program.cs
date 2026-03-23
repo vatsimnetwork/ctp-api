@@ -15,6 +15,7 @@ if (string.IsNullOrEmpty(authUri))
 builder.Services.AddHttpClient("AuthService", client =>
 {
     client.BaseAddress = new Uri(authUri);
+    client.DefaultRequestHeaders.Add("X-API-Key", builder.Configuration["AuthServiceAPIKey"]);
 });
 
 var app = builder.Build();
