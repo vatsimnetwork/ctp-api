@@ -6,15 +6,23 @@ public class ApiKeyMiddleware
 {
     private readonly RequestDelegate _next;
     private readonly IHttpClientFactory _httpClientFactory;
+    private readonly IWebHostEnvironment _env;
 
-    public ApiKeyMiddleware(RequestDelegate next, IHttpClientFactory httpClientFactory)
+    public ApiKeyMiddleware(RequestDelegate next, IHttpClientFactory httpClientFactory, IWebHostEnvironment env)
     {
         _next = next;
         _httpClientFactory = httpClientFactory;
+        _env = env;
     }
 
     public async Task InvokeAsync(HttpContext context)
     {
+        if (_env.IsDevelopment())
+        {
+            await _next(context);
+            return;
+        }
+
         if (!context.Request.Headers.TryGetValue("X-API-Key", out var extractedApiKey))
         {
             context.Response.StatusCode = (int)HttpStatusCode.Unauthorized;

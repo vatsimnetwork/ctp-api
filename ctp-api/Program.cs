@@ -1,10 +1,17 @@
+using ctp_api.Context;
 using ctp_api.Middleware;
 using DotNetEnv;
+using Microsoft.EntityFrameworkCore;
 
 var builder = WebApplication.CreateBuilder(args);
 
 Env.Load();
 builder.Configuration.AddEnvironmentVariables();
+
+builder.Services.AddControllers();
+builder.Services.AddDbContext<AppDbContext>(options =>
+    options.UseNpgsql(builder.Configuration.GetConnectionString("DefaultConnection")));
+
 builder.Services.AddOpenApi();
 
 var authUri = builder.Configuration["AuthServiceURL"];
@@ -25,9 +32,10 @@ if (app.Environment.IsDevelopment())
 {
     app.MapOpenApi();
 }
+
 app.UseApiKeyMiddleware();
 app.UseHttpsRedirection();
 
-
+app.MapControllers();
 
 app.Run();
