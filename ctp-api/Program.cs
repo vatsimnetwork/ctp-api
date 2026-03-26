@@ -14,14 +14,27 @@ builder.Services.AddDbContext<AppDbContext>(options =>
 
 builder.Services.AddOpenApi();
 
-var authUri = builder.Configuration["AuthServiceURL"];
-if (string.IsNullOrEmpty(authUri))
+var authUriRaw = builder.Configuration["AuthServiceURL"];
+if (string.IsNullOrWhiteSpace(authUriRaw))
 {
     throw new InvalidOperationException("AuthServiceURL is not configured. Please set it in the .env file.");
 }
+
+var authUriNormalized = authUriRaw.Trim();
+if (!authUriNormalized.Contains("://", StringComparison.Ordinal))
+{
+    authUriNormalized = $"http://{authUriNormalized}";
+}
+
+if (!Uri.TryCreate(authUriNormalized, UriKind.Absolute, out var authBaseUri)
+    || (authBaseUri.Scheme != Uri.UriSchemeHttp && authBaseUri.Scheme != Uri.UriSchemeHttps))
+{
+    throw new InvalidOperationException($"AuthServiceURL is invalid: '{authUriRaw}'. Provide a full URL like 'http://host.docker.internal:9000'.");
+}
+
 builder.Services.AddHttpClient("AuthService", client =>
 {
-    client.BaseAddress = new Uri(authUri);
+    client.BaseAddress = authBaseUri;
     client.DefaultRequestHeaders.Add("X-API-Key", builder.Configuration["AuthServiceAPIKey"]);
 });
 
@@ -34,7 +47,10 @@ if (app.Environment.IsDevelopment())
 }
 
 app.UseApiKeyMiddleware();
-app.UseHttpsRedirection();
+if (!app.Environment.IsDevelopment())
+{
+    app.UseHttpsRedirection();
+}
 
 app.MapControllers();
 
