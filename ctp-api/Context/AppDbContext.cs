@@ -67,6 +67,10 @@ public class AppDbContext : DbContext
         // ---------- RouteSegment ----------
         modelBuilder.Entity<RouteSegment>(entity =>
         {
+            entity.Property(e => e.Color).HasMaxLength(20);
+            entity.Property(e => e.Enabled).HasDefaultValue(true);
+            entity.HasIndex(e => e.Enabled);
+
             // List<string> maps natively to PostgreSQL text[] via Npgsql
             entity.Property(e => e.RouteSegmentTags).HasColumnType("text[]");
 

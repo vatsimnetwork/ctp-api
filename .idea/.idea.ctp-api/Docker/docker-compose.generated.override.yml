@@ -1,0 +1,20 @@
+# This is a generated file. Not intended for manual editing.
+services:
+  api:
+    build:
+      context: "/home/hwalker/Projects/VATSIM/ctp-api"
+      dockerfile: "ctp-api/Dockerfile"
+      target: "base"
+    command: []
+    entrypoint:
+    - "dotnet"
+    - "/app/bin/Debug/net10.0/ctp-api.dll"
+    environment:
+      DOTNET_USE_POLLING_FILE_WATCHER: "true"
+    image: "ctp-api:dev"
+    ports: []
+    volumes:
+    - "/home/hwalker/Projects/VATSIM/ctp-api/ctp-api:/app:rw"
+    - "/home/hwalker/Projects/VATSIM/ctp-api:/src:rw"
+    - "/home/hwalker/.nuget/packages:/root/.nuget/packages"
+    working_dir: "/app"

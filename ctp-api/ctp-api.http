@@ -1,6 +1,129 @@
-@ctp_api_HostAddress = http://localhost:5226
+@ctp_api_HostAddress = http://localhost:8080
+@X_API_Key = some-api-key
 
-GET {{ctp_api_HostAddress}}/weatherforecast/
+### Seed Database
+POST {{ctp_api_HostAddress}}/api/Seed
 Accept: application/json
+X-API-Key: {{X_API_Key}}
+Expect: 200 OK
 
-###
+### Get All Slots
+GET {{ctp_api_HostAddress}}/api/Slots
+Accept: application/json
+X-API-Key: {{X_API_Key}}
+Expect: 200 OK
+
+### Get Slot by ID
+GET {{ctp_api_HostAddress}}/api/Slots/1
+Accept: application/json
+X-API-Key: {{X_API_Key}}
+Expect: 200 OK
+
+### Create a Slot
+POST {{ctp_api_HostAddress}}/api/Slots
+Content-Type: application/json
+X-API-Key: {{X_API_Key}}
+Expect: 200 OK
+
+{
+  "departureTime": "2026-03-23T12:00:00Z",
+  "projectedArrivalTime": "2026-03-23T20:00:00Z"
+}
+
+### Update a Slot
+PUT {{ctp_api_HostAddress}}/api/Slots/1
+Content-Type: application/json
+X-API-Key: {{X_API_Key}}
+Expect: 200 OK
+
+{
+  "id": 1,
+  "departureTime": "2026-03-23T13:00:00Z",
+  "projectedArrivalTime": "2026-03-23T21:00:00Z"
+}
+
+### Delete a Slot
+DELETE {{ctp_api_HostAddress}}/api/Slots/1
+X-API-Key: {{X_API_Key}}
+Expect: 200 OK
+
+### Get All VATSIM Events
+GET {{ctp_api_HostAddress}}/api/VATSIMEvent
+Accept: application/json
+X-API-Key: {{X_API_Key}}
+Expect: 200 OK
+
+### Get VATSIM Event by ID
+GET {{ctp_api_HostAddress}}/api/VATSIMEvent/1
+Accept: application/json
+X-API-Key: {{X_API_Key}}
+Expect: 200 OK
+
+### Create a VATSIM Event
+POST {{ctp_api_HostAddress}}/api/VATSIMEvent
+Content-Type: application/json
+X-API-Key: {{X_API_Key}}
+Expect: 200 OK
+
+{
+  "title": "CTP 2026 Eastbound",
+  "date": "2026-03-23",
+  "departureTimeWindow": "03:00:00"
+}
+
+### Update a VATSIM Event
+PUT {{ctp_api_HostAddress}}/api/VATSIMEvent/1
+Content-Type: application/json
+X-API-Key: {{X_API_Key}}
+Expect: 200 OK
+
+{
+  "id": 1,
+  "title": "CTP 2026 Eastbound Updated",
+  "date": "2026-03-23",
+  "departureTimeWindow": "04:00:00"
+}
+
+### Delete a VATSIM Event
+DELETE {{ctp_api_HostAddress}}/api/VATSIMEvent/1
+X-API-Key: {{X_API_Key}}
+Expect: 200 OK
+
+### Get All Throughput Points
+GET {{ctp_api_HostAddress}}/api/ThroughputPoints
+Accept: application/json
+X-API-Key: {{X_API_Key}}
+Expect: 200 OK
+
+### Get Throughput Point by ID
+GET {{ctp_api_HostAddress}}/api/ThroughputPoints/1
+Accept: application/json
+X-API-Key: {{X_API_Key}}
+Expect: 200 OK
+
+### Create a Throughput Point
+POST {{ctp_api_HostAddress}}/api/ThroughputPoints
+Content-Type: application/json
+X-API-Key: {{X_API_Key}}
+Expect: 200 OK
+
+{
+  "identifier": "TESTPT",
+  "maximumAircraftPerHour": 30
+}
+
+### Update a Throughput Point
+PUT {{ctp_api_HostAddress}}/api/ThroughputPoints/1
+Content-Type: application/json
+X-API-Key: {{X_API_Key}}
+Expect: 200 OK
+
+{
+  "id": 1,
+  "identifier": "TESTPT_UPDATED",
+  "maximumAircraftPerHour": 40
+}
+
+### Delete a Throughput Point
+DELETE {{ctp_api_HostAddress}}/api/ThroughputPoints/1
+X-API-Key: {{X_API_Key}}
