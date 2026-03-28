@@ -1,0 +1,25 @@
+package models
+
+type SlotGenerationMode int
+
+const (
+	SlotGenerationModeMaximizeSlots SlotGenerationMode = iota
+	SlotGenerationModeRandom
+)
+
+type DepartureTimeWindowOffsetsCalculationMode int
+
+const (
+	DepartureTimeWindowOffsetsCalculationModeNone DepartureTimeWindowOffsetsCalculationMode = iota
+	DepartureTimeWindowOffsetsCalculationModeEarliestRoutes
+	DepartureTimeWindowOffsetsCalculationModeLatestRoutes
+	DepartureTimeWindowOffsetsCalculationModeRouteAverage
+)
+
+type WaypointThroughputCalculationMode int
+
+const (
+	WaypointThroughputCalculationModeNone WaypointThroughputCalculationMode = iota
+	WaypointThroughputCalculationModeFirstWaypointsOfNATRouteSegmentsOnly
+	WaypointThroughputCalculationModeAllWaypoints
+)

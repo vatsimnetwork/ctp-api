@@ -1,0 +1,1821 @@
+basePath: /api
+definitions:
+  models.Airport:
+    properties:
+      eventId:
+        type: integer
+      id:
+        type: integer
+      identifier:
+        type: string
+      latitude:
+        type: number
+      longitude:
+        type: number
+      maximumAircraftPerHour:
+        type: integer
+      numberOfVotes:
+        type: integer
+    type: object
+  models.Airway:
+    properties:
+      identifier:
+        type: string
+      waypoints:
+        items:
+          $ref: '#/definitions/models.AirwayWaypoint'
+        type: array
+    type: object
+  models.AirwayWaypoint:
+    properties:
+      airwayId:
+        type: string
+      id:
+        type: integer
+      location:
+        $ref: '#/definitions/models.Location'
+      locationId:
+        type: integer
+      order:
+        type: integer
+    type: object
+  models.BatchSaveRequest:
+    properties:
+      deletes:
+        items:
+          type: integer
+        type: array
+      updates:
+        items:
+          $ref: '#/definitions/models.RouteSegment'
+        type: array
+    type: object
+  models.CustomFix:
+    properties:
+      createdAt:
+        type: string
+      id:
+        type: integer
+      identifier:
+        type: string
+      latitude:
+        type: number
+      longitude:
+        type: number
+      note:
+        type: string
+    type: object
+  models.DepartureTimeWindowOffsetsCalculationMode:
+    enum:
+    - 0
+    - 1
+    - 2
+    - 3
+    type: integer
+    x-enum-varnames:
+    - DepartureTimeWindowOffsetsCalculationModeNone
+    - DepartureTimeWindowOffsetsCalculationModeEarliestRoutes
+    - DepartureTimeWindowOffsetsCalculationModeLatestRoutes
+    - DepartureTimeWindowOffsetsCalculationModeRouteAverage
+  models.ErrorResponse:
+    properties:
+      error:
+        type: string
+      message:
+        type: string
+    type: object
+  models.HighlightedWaypoint:
+    properties:
+      color:
+        type: string
+      createdAt:
+        type: string
+      id:
+        type: integer
+      identifier:
+        type: string
+      note:
+        type: string
+    type: object
+  models.Location:
+    properties:
+      eventId:
+        type: integer
+      id:
+        type: integer
+      identifier:
+        type: string
+      latitude:
+        type: number
+      longitude:
+        type: number
+      maximumAircraftPerHour:
+        type: integer
+      routeSegmentId:
+        type: integer
+      sortOrder:
+        type: integer
+    type: object
+  models.RouteRevisionEntry:
+    properties:
+      color:
+        type: string
+      enabled:
+        type: boolean
+      facilities:
+        type: string
+      group:
+        type: string
+      id:
+        type: integer
+      identifier:
+        type: string
+      revisionId:
+        type: integer
+      routeString:
+        type: string
+      tags:
+        type: string
+    type: object
+  models.RouteRevisionSet:
+    properties:
+      createdAt:
+        type: string
+      entries:
+        items:
+          $ref: '#/definitions/models.RouteRevisionEntry'
+        type: array
+      id:
+        type: integer
+      number:
+        type: integer
+    type: object
+  models.RouteSegment:
+    properties:
+      color:
+        type: string
+      enabled:
+        type: boolean
+      eventId:
+        type: integer
+      facilities:
+        type: string
+      id:
+        type: integer
+      identifier:
+        type: string
+      locations:
+        items:
+          $ref: '#/definitions/models.Location'
+        type: array
+      maximumAircraftPerHour:
+        type: integer
+      providedFacilityProgression:
+        items:
+          $ref: '#/definitions/models.Sector'
+        type: array
+      routeRevision:
+        type: integer
+      routeSegmentGroup:
+        type: string
+      routeString:
+        type: string
+      tags:
+        items:
+          $ref: '#/definitions/models.RouteSegmentTag'
+        type: array
+    type: object
+  models.RouteSegmentTag:
+    properties:
+      id:
+        type: integer
+      routeSegmentId:
+        type: integer
+      tag:
+        type: string
+    type: object
+  models.Sector:
+    properties:
+      eventId:
+        type: integer
+      id:
+        type: integer
+      identifier:
+        type: string
+      maximumAircraftPerHour:
+        type: integer
+      sectorBoundaries:
+        items:
+          $ref: '#/definitions/models.SectorBoundary'
+        type: array
+    type: object
+  models.SectorBoundary:
+    properties:
+      coordinates:
+        items:
+          $ref: '#/definitions/models.SectorBoundaryCoordinate'
+        type: array
+      id:
+        type: integer
+      maxLatitude:
+        type: number
+      maxLongitude:
+        type: number
+      minLatitude:
+        type: number
+      minLongitude:
+        type: number
+      sectorId:
+        type: integer
+    type: object
+  models.SectorBoundaryCoordinate:
+    properties:
+      id:
+        type: integer
+      latitude:
+        type: number
+      longitude:
+        type: number
+      sectorBoundaryId:
+        type: integer
+      sortOrder:
+        type: integer
+    type: object
+  models.SimulatorDataResponse:
+    properties:
+      event:
+        $ref: '#/definitions/models.VATSIMEvent'
+      revision:
+        $ref: '#/definitions/models.SlotRevision'
+    type: object
+  models.Slot:
+    properties:
+      arrivalAirport:
+        $ref: '#/definitions/models.Airport'
+      arrivalAirportId:
+        type: integer
+      departureAirport:
+        $ref: '#/definitions/models.Airport'
+      departureAirportId:
+        type: integer
+      departureTime:
+        type: string
+      id:
+        type: integer
+      projectedArrivalTime:
+        type: string
+      routeSegments:
+        items:
+          $ref: '#/definitions/models.RouteSegment'
+        type: array
+      slotRevisionId:
+        type: integer
+    type: object
+  models.SlotGenerationMode:
+    enum:
+    - 0
+    - 1
+    type: integer
+    x-enum-varnames:
+    - SlotGenerationModeMaximizeSlots
+    - SlotGenerationModeRandom
+  models.SlotRevision:
+    properties:
+      createdAt:
+        type: string
+      eventId:
+        type: integer
+      id:
+        type: integer
+      number:
+        type: integer
+      simulationOutputCommentary:
+        type: string
+      slotGenerationOutputCommentary:
+        type: string
+      slots:
+        items:
+          $ref: '#/definitions/models.Slot'
+        type: array
+      throughputSnapshots:
+        items:
+          $ref: '#/definitions/models.ThroughputSnapshot'
+        type: array
+      throughputStates:
+        items:
+          $ref: '#/definitions/models.ThroughputState'
+        type: array
+    type: object
+  models.SuccessResponse:
+    properties:
+      success:
+        type: boolean
+    type: object
+  models.ThroughputSnapshot:
+    properties:
+      id:
+        type: integer
+      minuteOffset:
+        type: integer
+      slot:
+        $ref: '#/definitions/models.Slot'
+      slotId:
+        type: integer
+      slotRevisionId:
+        type: integer
+      throughputPointId:
+        type: integer
+      throughputPointType:
+        type: string
+    type: object
+  models.ThroughputState:
+    properties:
+      departureTimeWindowStart:
+        type: string
+      id:
+        type: integer
+      maximumSlots:
+        type: integer
+      slotRevisionId:
+        type: integer
+      slotsAllocated:
+        type: integer
+      throughputPointId:
+        type: integer
+      throughputPointType:
+        type: string
+    type: object
+  models.VATSIMEvent:
+    properties:
+      airports:
+        items:
+          $ref: '#/definitions/models.Airport'
+        type: array
+      calculateThroughputDataOnlyForManuallyProvidedSectors:
+        type: boolean
+      calculationFallbackGroundSpeed:
+        type: number
+      date:
+        type: string
+      departureTimeWindow:
+        example: 3h0m0s
+        type: string
+      departureTimeWindowOffsetSynchronizationLongitude:
+        type: number
+      departureTimeWindowOffsetSynchronizationTimeOfDay:
+        type: string
+      highSimulationAccuracy:
+        type: boolean
+      id:
+        type: integer
+      intendedDepartureTimeWindowOffsetsCalculationMode:
+        $ref: '#/definitions/models.DepartureTimeWindowOffsetsCalculationMode'
+      intendedSlotGenerationMode:
+        $ref: '#/definitions/models.SlotGenerationMode'
+      intendedWaypointThroughputCalculationMode:
+        $ref: '#/definitions/models.WaypointThroughputCalculationMode'
+      recalculateMaximumAirportSlots:
+        type: boolean
+      routeRevision:
+        type: integer
+      routeSegments:
+        items:
+          $ref: '#/definitions/models.RouteSegment'
+        type: array
+      sectors:
+        items:
+          $ref: '#/definitions/models.Sector'
+        type: array
+      shouldSimulationUseActualWeatherForecastData:
+        type: boolean
+      simulationAnalysisResolutionInMinutes:
+        type: integer
+      slotRevisions:
+        items:
+          $ref: '#/definitions/models.SlotRevision'
+        type: array
+      thresholdToCheckIfAirplaneIsCountedAtWaypointInNm:
+        type: number
+      title:
+        type: string
+      waypoints:
+        items:
+          $ref: '#/definitions/models.Location'
+        type: array
+    type: object
+  models.WaypointThroughputCalculationMode:
+    enum:
+    - 0
+    - 1
+    - 2
+    type: integer
+    x-enum-varnames:
+    - WaypointThroughputCalculationModeNone
+    - WaypointThroughputCalculationModeFirstWaypointsOfNATRouteSegmentsOnly
+    - WaypointThroughputCalculationModeAllWaypoints
+host: localhost:3000
+info:
+  contact: {}
+  description: Central data API for CTP (Cross the Pond) event management. All /api/*
+    endpoints require an X-API-Key header.
+  title: CTP API
+  version: 1.0.0
+paths:
+  /airports/{id}:
+    delete:
+      parameters:
+      - description: Airport ID
+        in: path
+        name: id
+        required: true
+        type: integer
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            $ref: '#/definitions/models.SuccessResponse'
+        "400":
+          description: Bad Request
+          schema:
+            $ref: '#/definitions/models.ErrorResponse'
+        "404":
+          description: Not Found
+          schema:
+            $ref: '#/definitions/models.ErrorResponse'
+      security:
+      - ApiKeyAuth: []
+      summary: Delete airport
+      tags:
+      - airports
+    put:
+      consumes:
+      - application/json
+      parameters:
+      - description: Airport ID
+        in: path
+        name: id
+        required: true
+        type: integer
+      - description: Airport fields to update
+        in: body
+        name: airport
+        required: true
+        schema:
+          $ref: '#/definitions/models.Airport'
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            $ref: '#/definitions/models.Airport'
+        "400":
+          description: Bad Request
+          schema:
+            $ref: '#/definitions/models.ErrorResponse'
+        "404":
+          description: Not Found
+          schema:
+            $ref: '#/definitions/models.ErrorResponse'
+      security:
+      - ApiKeyAuth: []
+      summary: Update airport
+      tags:
+      - airports
+  /airways:
+    delete:
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            $ref: '#/definitions/models.SuccessResponse'
+        "500":
+          description: Internal Server Error
+          schema:
+            $ref: '#/definitions/models.ErrorResponse'
+      security:
+      - ApiKeyAuth: []
+      summary: Delete all airways
+      tags:
+      - airways
+    get:
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            items:
+              $ref: '#/definitions/models.Airway'
+            type: array
+        "500":
+          description: Internal Server Error
+          schema:
+            $ref: '#/definitions/models.ErrorResponse'
+      security:
+      - ApiKeyAuth: []
+      summary: List all airways with waypoints
+      tags:
+      - airways
+    post:
+      consumes:
+      - application/json
+      parameters:
+      - description: Airway
+        in: body
+        name: airway
+        required: true
+        schema:
+          $ref: '#/definitions/models.Airway'
+      produces:
+      - application/json
+      responses:
+        "201":
+          description: Created
+          schema:
+            $ref: '#/definitions/models.Airway'
+        "400":
+          description: Bad Request
+          schema:
+            $ref: '#/definitions/models.ErrorResponse'
+      security:
+      - ApiKeyAuth: []
+      summary: Create airway
+      tags:
+      - airways
+  /airways/{identifier}:
+    delete:
+      parameters:
+      - description: Airway identifier
+        in: path
+        name: identifier
+        required: true
+        type: string
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            $ref: '#/definitions/models.SuccessResponse'
+        "400":
+          description: Bad Request
+          schema:
+            $ref: '#/definitions/models.ErrorResponse'
+        "404":
+          description: Not Found
+          schema:
+            $ref: '#/definitions/models.ErrorResponse'
+      security:
+      - ApiKeyAuth: []
+      summary: Delete airway by identifier
+      tags:
+      - airways
+  /airways/bulk:
+    post:
+      consumes:
+      - application/json
+      parameters:
+      - description: Airways
+        in: body
+        name: airways
+        required: true
+        schema:
+          items:
+            $ref: '#/definitions/models.Airway'
+          type: array
+      produces:
+      - application/json
+      responses:
+        "201":
+          description: Created
+          schema:
+            items:
+              $ref: '#/definitions/models.Airway'
+            type: array
+        "400":
+          description: Bad Request
+          schema:
+            $ref: '#/definitions/models.ErrorResponse'
+      security:
+      - ApiKeyAuth: []
+      summary: Bulk create airways
+      tags:
+      - airways
+  /custom-fixes:
+    get:
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            items:
+              $ref: '#/definitions/models.CustomFix'
+            type: array
+        "500":
+          description: Internal Server Error
+          schema:
+            $ref: '#/definitions/models.ErrorResponse'
+      security:
+      - ApiKeyAuth: []
+      summary: List all custom fixes
+      tags:
+      - custom-fixes
+    post:
+      consumes:
+      - application/json
+      parameters:
+      - description: Custom fix
+        in: body
+        name: fix
+        required: true
+        schema:
+          $ref: '#/definitions/models.CustomFix'
+      produces:
+      - application/json
+      responses:
+        "201":
+          description: Created
+          schema:
+            $ref: '#/definitions/models.CustomFix'
+        "400":
+          description: Bad Request
+          schema:
+            $ref: '#/definitions/models.ErrorResponse'
+      security:
+      - ApiKeyAuth: []
+      summary: Create or update custom fix (upsert by identifier)
+      tags:
+      - custom-fixes
+  /custom-fixes/{identifier}:
+    delete:
+      parameters:
+      - description: Custom fix identifier
+        in: path
+        name: identifier
+        required: true
+        type: string
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            $ref: '#/definitions/models.SuccessResponse'
+        "400":
+          description: Bad Request
+          schema:
+            $ref: '#/definitions/models.ErrorResponse'
+        "404":
+          description: Not Found
+          schema:
+            $ref: '#/definitions/models.ErrorResponse'
+      security:
+      - ApiKeyAuth: []
+      summary: Delete custom fix
+      tags:
+      - custom-fixes
+  /events:
+    get:
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            items:
+              $ref: '#/definitions/models.VATSIMEvent'
+            type: array
+        "500":
+          description: Internal Server Error
+          schema:
+            $ref: '#/definitions/models.ErrorResponse'
+      security:
+      - ApiKeyAuth: []
+      summary: List all events
+      tags:
+      - events
+    post:
+      consumes:
+      - application/json
+      parameters:
+      - description: Event
+        in: body
+        name: event
+        required: true
+        schema:
+          $ref: '#/definitions/models.VATSIMEvent'
+      produces:
+      - application/json
+      responses:
+        "201":
+          description: Created
+          schema:
+            $ref: '#/definitions/models.VATSIMEvent'
+        "400":
+          description: Bad Request
+          schema:
+            $ref: '#/definitions/models.ErrorResponse'
+      security:
+      - ApiKeyAuth: []
+      summary: Create event
+      tags:
+      - events
+  /events/{eventId}/airports:
+    get:
+      parameters:
+      - description: Event ID
+        in: path
+        name: eventId
+        required: true
+        type: integer
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            items:
+              $ref: '#/definitions/models.Airport'
+            type: array
+        "400":
+          description: Bad Request
+          schema:
+            $ref: '#/definitions/models.ErrorResponse'
+      security:
+      - ApiKeyAuth: []
+      summary: List airports for an event
+      tags:
+      - airports
+    post:
+      consumes:
+      - application/json
+      parameters:
+      - description: Event ID
+        in: path
+        name: eventId
+        required: true
+        type: integer
+      - description: Airport
+        in: body
+        name: airport
+        required: true
+        schema:
+          $ref: '#/definitions/models.Airport'
+      produces:
+      - application/json
+      responses:
+        "201":
+          description: Created
+          schema:
+            $ref: '#/definitions/models.Airport'
+        "400":
+          description: Bad Request
+          schema:
+            $ref: '#/definitions/models.ErrorResponse'
+      security:
+      - ApiKeyAuth: []
+      summary: Create airport
+      tags:
+      - airports
+  /events/{eventId}/route-segments:
+    get:
+      parameters:
+      - description: Event ID
+        in: path
+        name: eventId
+        required: true
+        type: integer
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            items:
+              $ref: '#/definitions/models.RouteSegment'
+            type: array
+        "400":
+          description: Bad Request
+          schema:
+            $ref: '#/definitions/models.ErrorResponse'
+      security:
+      - ApiKeyAuth: []
+      summary: List route segments for an event
+      tags:
+      - route-segments
+  /events/{eventId}/sectors:
+    get:
+      parameters:
+      - description: Event ID
+        in: path
+        name: eventId
+        required: true
+        type: integer
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            items:
+              $ref: '#/definitions/models.Sector'
+            type: array
+        "400":
+          description: Bad Request
+          schema:
+            $ref: '#/definitions/models.ErrorResponse'
+      security:
+      - ApiKeyAuth: []
+      summary: List sectors for an event
+      tags:
+      - sectors
+    post:
+      consumes:
+      - application/json
+      parameters:
+      - description: Event ID
+        in: path
+        name: eventId
+        required: true
+        type: integer
+      - description: Sector
+        in: body
+        name: sector
+        required: true
+        schema:
+          $ref: '#/definitions/models.Sector'
+      produces:
+      - application/json
+      responses:
+        "201":
+          description: Created
+          schema:
+            $ref: '#/definitions/models.Sector'
+        "400":
+          description: Bad Request
+          schema:
+            $ref: '#/definitions/models.ErrorResponse'
+      security:
+      - ApiKeyAuth: []
+      summary: Create sector
+      tags:
+      - sectors
+  /events/{eventId}/slot-revisions:
+    get:
+      parameters:
+      - description: Event ID
+        in: path
+        name: eventId
+        required: true
+        type: integer
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            items:
+              $ref: '#/definitions/models.SlotRevision'
+            type: array
+        "400":
+          description: Bad Request
+          schema:
+            $ref: '#/definitions/models.ErrorResponse'
+      security:
+      - ApiKeyAuth: []
+      summary: List slot revisions for an event
+      tags:
+      - slot-revisions
+    post:
+      consumes:
+      - application/json
+      parameters:
+      - description: Event ID
+        in: path
+        name: eventId
+        required: true
+        type: integer
+      - description: Slot revision (number auto-assigned if 0)
+        in: body
+        name: revision
+        required: true
+        schema:
+          $ref: '#/definitions/models.SlotRevision'
+      produces:
+      - application/json
+      responses:
+        "201":
+          description: Created
+          schema:
+            $ref: '#/definitions/models.SlotRevision'
+        "400":
+          description: Bad Request
+          schema:
+            $ref: '#/definitions/models.ErrorResponse'
+      security:
+      - ApiKeyAuth: []
+      summary: Create slot revision
+      tags:
+      - slot-revisions
+  /events/{eventId}/slot-revisions/{number}:
+    get:
+      parameters:
+      - description: Event ID
+        in: path
+        name: eventId
+        required: true
+        type: integer
+      - description: Revision number
+        in: path
+        name: number
+        required: true
+        type: integer
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            $ref: '#/definitions/models.SlotRevision'
+        "400":
+          description: Bad Request
+          schema:
+            $ref: '#/definitions/models.ErrorResponse'
+        "404":
+          description: Not Found
+          schema:
+            $ref: '#/definitions/models.ErrorResponse'
+      security:
+      - ApiKeyAuth: []
+      summary: Get slot revision by number
+      tags:
+      - slot-revisions
+  /events/{eventId}/slot-revisions/latest:
+    get:
+      parameters:
+      - description: Event ID
+        in: path
+        name: eventId
+        required: true
+        type: integer
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            $ref: '#/definitions/models.SlotRevision'
+        "400":
+          description: Bad Request
+          schema:
+            $ref: '#/definitions/models.ErrorResponse'
+        "404":
+          description: Not Found
+          schema:
+            $ref: '#/definitions/models.ErrorResponse'
+      security:
+      - ApiKeyAuth: []
+      summary: Get latest slot revision for an event (fully preloaded)
+      tags:
+      - slot-revisions
+  /events/{eventId}/waypoints:
+    delete:
+      parameters:
+      - description: Event ID
+        in: path
+        name: eventId
+        required: true
+        type: integer
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            $ref: '#/definitions/models.SuccessResponse'
+        "400":
+          description: Bad Request
+          schema:
+            $ref: '#/definitions/models.ErrorResponse'
+      security:
+      - ApiKeyAuth: []
+      summary: Delete all waypoints for an event
+      tags:
+      - waypoints
+    get:
+      parameters:
+      - description: Event ID
+        in: path
+        name: eventId
+        required: true
+        type: integer
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            items:
+              $ref: '#/definitions/models.Location'
+            type: array
+        "400":
+          description: Bad Request
+          schema:
+            $ref: '#/definitions/models.ErrorResponse'
+      security:
+      - ApiKeyAuth: []
+      summary: List waypoints for an event
+      tags:
+      - waypoints
+    post:
+      consumes:
+      - application/json
+      parameters:
+      - description: Event ID
+        in: path
+        name: eventId
+        required: true
+        type: integer
+      - description: Waypoint
+        in: body
+        name: waypoint
+        required: true
+        schema:
+          $ref: '#/definitions/models.Location'
+      produces:
+      - application/json
+      responses:
+        "201":
+          description: Created
+          schema:
+            $ref: '#/definitions/models.Location'
+        "400":
+          description: Bad Request
+          schema:
+            $ref: '#/definitions/models.ErrorResponse'
+      security:
+      - ApiKeyAuth: []
+      summary: Create waypoint
+      tags:
+      - waypoints
+  /events/{eventId}/waypoints/bulk:
+    post:
+      consumes:
+      - application/json
+      parameters:
+      - description: Event ID
+        in: path
+        name: eventId
+        required: true
+        type: integer
+      - description: Waypoints
+        in: body
+        name: waypoints
+        required: true
+        schema:
+          items:
+            $ref: '#/definitions/models.Location'
+          type: array
+      produces:
+      - application/json
+      responses:
+        "201":
+          description: Created
+          schema:
+            items:
+              $ref: '#/definitions/models.Location'
+            type: array
+        "400":
+          description: Bad Request
+          schema:
+            $ref: '#/definitions/models.ErrorResponse'
+      security:
+      - ApiKeyAuth: []
+      summary: Bulk create waypoints
+      tags:
+      - waypoints
+  /events/{id}:
+    delete:
+      parameters:
+      - description: Event ID
+        in: path
+        name: id
+        required: true
+        type: integer
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            $ref: '#/definitions/models.SuccessResponse'
+        "400":
+          description: Bad Request
+          schema:
+            $ref: '#/definitions/models.ErrorResponse'
+        "404":
+          description: Not Found
+          schema:
+            $ref: '#/definitions/models.ErrorResponse'
+      security:
+      - ApiKeyAuth: []
+      summary: Delete event
+      tags:
+      - events
+    get:
+      parameters:
+      - description: Event ID
+        in: path
+        name: id
+        required: true
+        type: integer
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            $ref: '#/definitions/models.VATSIMEvent'
+        "400":
+          description: Bad Request
+          schema:
+            $ref: '#/definitions/models.ErrorResponse'
+        "404":
+          description: Not Found
+          schema:
+            $ref: '#/definitions/models.ErrorResponse'
+      security:
+      - ApiKeyAuth: []
+      summary: Get event with all nested data
+      tags:
+      - events
+    put:
+      consumes:
+      - application/json
+      parameters:
+      - description: Event ID
+        in: path
+        name: id
+        required: true
+        type: integer
+      - description: Event fields to update
+        in: body
+        name: event
+        required: true
+        schema:
+          $ref: '#/definitions/models.VATSIMEvent'
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            $ref: '#/definitions/models.VATSIMEvent'
+        "400":
+          description: Bad Request
+          schema:
+            $ref: '#/definitions/models.ErrorResponse'
+        "404":
+          description: Not Found
+          schema:
+            $ref: '#/definitions/models.ErrorResponse'
+      security:
+      - ApiKeyAuth: []
+      summary: Update event
+      tags:
+      - events
+  /events/{id}/simulator-data:
+    get:
+      parameters:
+      - description: Event ID
+        in: path
+        name: id
+        required: true
+        type: integer
+      - description: Specific slot revision number (defaults to latest)
+        in: query
+        name: revision
+        type: integer
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            $ref: '#/definitions/models.SimulatorDataResponse'
+        "400":
+          description: Bad Request
+          schema:
+            $ref: '#/definitions/models.ErrorResponse'
+        "404":
+          description: Not Found
+          schema:
+            $ref: '#/definitions/models.ErrorResponse'
+      security:
+      - ApiKeyAuth: []
+      summary: Get full simulator data for an event
+      tags:
+      - events
+  /highlighted-waypoints:
+    get:
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            items:
+              $ref: '#/definitions/models.HighlightedWaypoint'
+            type: array
+        "500":
+          description: Internal Server Error
+          schema:
+            $ref: '#/definitions/models.ErrorResponse'
+      security:
+      - ApiKeyAuth: []
+      summary: List all highlighted waypoints
+      tags:
+      - highlighted-waypoints
+    post:
+      consumes:
+      - application/json
+      parameters:
+      - description: Highlighted waypoint
+        in: body
+        name: waypoint
+        required: true
+        schema:
+          $ref: '#/definitions/models.HighlightedWaypoint'
+      produces:
+      - application/json
+      responses:
+        "201":
+          description: Created
+          schema:
+            $ref: '#/definitions/models.HighlightedWaypoint'
+        "400":
+          description: Bad Request
+          schema:
+            $ref: '#/definitions/models.ErrorResponse'
+      security:
+      - ApiKeyAuth: []
+      summary: Create or update highlighted waypoint (upsert by identifier)
+      tags:
+      - highlighted-waypoints
+  /highlighted-waypoints/{identifier}:
+    delete:
+      parameters:
+      - description: Waypoint identifier
+        in: path
+        name: identifier
+        required: true
+        type: string
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            $ref: '#/definitions/models.SuccessResponse'
+        "400":
+          description: Bad Request
+          schema:
+            $ref: '#/definitions/models.ErrorResponse'
+        "404":
+          description: Not Found
+          schema:
+            $ref: '#/definitions/models.ErrorResponse'
+      security:
+      - ApiKeyAuth: []
+      summary: Delete highlighted waypoint
+      tags:
+      - highlighted-waypoints
+  /route-revisions:
+    get:
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            items:
+              $ref: '#/definitions/models.RouteRevisionSet'
+            type: array
+        "500":
+          description: Internal Server Error
+          schema:
+            $ref: '#/definitions/models.ErrorResponse'
+      security:
+      - ApiKeyAuth: []
+      summary: List all route revisions
+      tags:
+      - route-revisions
+    post:
+      parameters:
+      - description: Event ID — snapshots segments for this event; omit for unassigned
+          segments
+        in: query
+        name: eventId
+        type: integer
+      produces:
+      - application/json
+      responses:
+        "201":
+          description: Created
+          schema:
+            $ref: '#/definitions/models.RouteRevisionSet'
+        "500":
+          description: Internal Server Error
+          schema:
+            $ref: '#/definitions/models.ErrorResponse'
+      security:
+      - ApiKeyAuth: []
+      summary: Snapshot current route segments as a new revision
+      tags:
+      - route-revisions
+  /route-revisions/{number}:
+    get:
+      parameters:
+      - description: Revision number
+        in: path
+        name: number
+        required: true
+        type: integer
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            $ref: '#/definitions/models.RouteRevisionSet'
+        "400":
+          description: Bad Request
+          schema:
+            $ref: '#/definitions/models.ErrorResponse'
+        "404":
+          description: Not Found
+          schema:
+            $ref: '#/definitions/models.ErrorResponse'
+      security:
+      - ApiKeyAuth: []
+      summary: Get route revision by number
+      tags:
+      - route-revisions
+  /route-segments:
+    get:
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            items:
+              $ref: '#/definitions/models.RouteSegment'
+            type: array
+        "500":
+          description: Internal Server Error
+          schema:
+            $ref: '#/definitions/models.ErrorResponse'
+      security:
+      - ApiKeyAuth: []
+      summary: List all route segments
+      tags:
+      - route-segments
+    post:
+      consumes:
+      - application/json
+      parameters:
+      - description: Route segment
+        in: body
+        name: segment
+        required: true
+        schema:
+          $ref: '#/definitions/models.RouteSegment'
+      produces:
+      - application/json
+      responses:
+        "201":
+          description: Created
+          schema:
+            $ref: '#/definitions/models.RouteSegment'
+        "400":
+          description: Bad Request
+          schema:
+            $ref: '#/definitions/models.ErrorResponse'
+      security:
+      - ApiKeyAuth: []
+      summary: Create route segment
+      tags:
+      - route-segments
+  /route-segments/{id}:
+    delete:
+      parameters:
+      - description: Route segment ID
+        in: path
+        name: id
+        required: true
+        type: integer
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            $ref: '#/definitions/models.SuccessResponse'
+        "400":
+          description: Bad Request
+          schema:
+            $ref: '#/definitions/models.ErrorResponse'
+        "404":
+          description: Not Found
+          schema:
+            $ref: '#/definitions/models.ErrorResponse'
+      security:
+      - ApiKeyAuth: []
+      summary: Delete route segment
+      tags:
+      - route-segments
+    put:
+      consumes:
+      - application/json
+      parameters:
+      - description: Route segment ID
+        in: path
+        name: id
+        required: true
+        type: integer
+      - description: Route segment fields to update
+        in: body
+        name: segment
+        required: true
+        schema:
+          $ref: '#/definitions/models.RouteSegment'
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            $ref: '#/definitions/models.RouteSegment'
+        "400":
+          description: Bad Request
+          schema:
+            $ref: '#/definitions/models.ErrorResponse'
+        "404":
+          description: Not Found
+          schema:
+            $ref: '#/definitions/models.ErrorResponse'
+      security:
+      - ApiKeyAuth: []
+      summary: Update route segment
+      tags:
+      - route-segments
+  /route-segments/save:
+    post:
+      consumes:
+      - application/json
+      parameters:
+      - description: 'Batch payload: updates (array of RouteSegment) and deletes (array
+          of IDs)'
+        in: body
+        name: payload
+        required: true
+        schema:
+          $ref: '#/definitions/models.BatchSaveRequest'
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: 'success: true'
+          schema:
+            $ref: '#/definitions/models.SuccessResponse'
+        "400":
+          description: Bad Request
+          schema:
+            $ref: '#/definitions/models.ErrorResponse'
+      security:
+      - ApiKeyAuth: []
+      summary: Batch create/update/delete route segments in a single transaction
+      tags:
+      - route-segments
+  /sectors/{id}:
+    delete:
+      parameters:
+      - description: Sector ID
+        in: path
+        name: id
+        required: true
+        type: integer
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            $ref: '#/definitions/models.SuccessResponse'
+        "400":
+          description: Bad Request
+          schema:
+            $ref: '#/definitions/models.ErrorResponse'
+        "404":
+          description: Not Found
+          schema:
+            $ref: '#/definitions/models.ErrorResponse'
+      security:
+      - ApiKeyAuth: []
+      summary: Delete sector
+      tags:
+      - sectors
+    put:
+      consumes:
+      - application/json
+      parameters:
+      - description: Sector ID
+        in: path
+        name: id
+        required: true
+        type: integer
+      - description: Sector fields to update
+        in: body
+        name: sector
+        required: true
+        schema:
+          $ref: '#/definitions/models.Sector'
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            $ref: '#/definitions/models.Sector'
+        "400":
+          description: Bad Request
+          schema:
+            $ref: '#/definitions/models.ErrorResponse'
+        "404":
+          description: Not Found
+          schema:
+            $ref: '#/definitions/models.ErrorResponse'
+      security:
+      - ApiKeyAuth: []
+      summary: Update sector
+      tags:
+      - sectors
+  /slot-revisions/{revisionId}:
+    delete:
+      parameters:
+      - description: Slot revision ID
+        in: path
+        name: revisionId
+        required: true
+        type: integer
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            $ref: '#/definitions/models.SuccessResponse'
+        "400":
+          description: Bad Request
+          schema:
+            $ref: '#/definitions/models.ErrorResponse'
+        "404":
+          description: Not Found
+          schema:
+            $ref: '#/definitions/models.ErrorResponse'
+      security:
+      - ApiKeyAuth: []
+      summary: Delete slot revision
+      tags:
+      - slot-revisions
+    put:
+      consumes:
+      - application/json
+      parameters:
+      - description: Slot revision ID
+        in: path
+        name: revisionId
+        required: true
+        type: integer
+      - description: Fields to update
+        in: body
+        name: revision
+        required: true
+        schema:
+          $ref: '#/definitions/models.SlotRevision'
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            $ref: '#/definitions/models.SlotRevision'
+        "400":
+          description: Bad Request
+          schema:
+            $ref: '#/definitions/models.ErrorResponse'
+        "404":
+          description: Not Found
+          schema:
+            $ref: '#/definitions/models.ErrorResponse'
+      security:
+      - ApiKeyAuth: []
+      summary: Update slot revision metadata
+      tags:
+      - slot-revisions
+  /slot-revisions/{revisionId}/slots:
+    post:
+      consumes:
+      - application/json
+      parameters:
+      - description: Slot revision ID
+        in: path
+        name: revisionId
+        required: true
+        type: integer
+      - description: Slots to add
+        in: body
+        name: slots
+        required: true
+        schema:
+          items:
+            $ref: '#/definitions/models.Slot'
+          type: array
+      produces:
+      - application/json
+      responses:
+        "201":
+          description: Created
+          schema:
+            items:
+              $ref: '#/definitions/models.Slot'
+            type: array
+        "400":
+          description: Bad Request
+          schema:
+            $ref: '#/definitions/models.ErrorResponse'
+        "404":
+          description: Not Found
+          schema:
+            $ref: '#/definitions/models.ErrorResponse'
+      security:
+      - ApiKeyAuth: []
+      summary: Add slots to a slot revision
+      tags:
+      - slot-revisions
+  /slot-revisions/{revisionId}/throughput-snapshots:
+    post:
+      consumes:
+      - application/json
+      parameters:
+      - description: Slot revision ID
+        in: path
+        name: revisionId
+        required: true
+        type: integer
+      - description: Throughput snapshots
+        in: body
+        name: snapshots
+        required: true
+        schema:
+          items:
+            $ref: '#/definitions/models.ThroughputSnapshot'
+          type: array
+      produces:
+      - application/json
+      responses:
+        "201":
+          description: Created
+          schema:
+            items:
+              $ref: '#/definitions/models.ThroughputSnapshot'
+            type: array
+        "400":
+          description: Bad Request
+          schema:
+            $ref: '#/definitions/models.ErrorResponse'
+        "404":
+          description: Not Found
+          schema:
+            $ref: '#/definitions/models.ErrorResponse'
+      security:
+      - ApiKeyAuth: []
+      summary: Add throughput snapshots to a slot revision
+      tags:
+      - slot-revisions
+  /slot-revisions/{revisionId}/throughput-states:
+    post:
+      consumes:
+      - application/json
+      parameters:
+      - description: Slot revision ID
+        in: path
+        name: revisionId
+        required: true
+        type: integer
+      - description: Throughput states
+        in: body
+        name: states
+        required: true
+        schema:
+          items:
+            $ref: '#/definitions/models.ThroughputState'
+          type: array
+      produces:
+      - application/json
+      responses:
+        "201":
+          description: Created
+          schema:
+            items:
+              $ref: '#/definitions/models.ThroughputState'
+            type: array
+        "400":
+          description: Bad Request
+          schema:
+            $ref: '#/definitions/models.ErrorResponse'
+        "404":
+          description: Not Found
+          schema:
+            $ref: '#/definitions/models.ErrorResponse'
+      security:
+      - ApiKeyAuth: []
+      summary: Add throughput states to a slot revision
+      tags:
+      - slot-revisions
+  /waypoints/{id}:
+    delete:
+      parameters:
+      - description: Waypoint ID
+        in: path
+        name: id
+        required: true
+        type: integer
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            $ref: '#/definitions/models.SuccessResponse'
+        "400":
+          description: Bad Request
+          schema:
+            $ref: '#/definitions/models.ErrorResponse'
+        "404":
+          description: Not Found
+          schema:
+            $ref: '#/definitions/models.ErrorResponse'
+      security:
+      - ApiKeyAuth: []
+      summary: Delete waypoint
+      tags:
+      - waypoints
+    put:
+      consumes:
+      - application/json
+      parameters:
+      - description: Waypoint ID
+        in: path
+        name: id
+        required: true
+        type: integer
+      - description: Waypoint fields to update
+        in: body
+        name: waypoint
+        required: true
+        schema:
+          $ref: '#/definitions/models.Location'
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            $ref: '#/definitions/models.Location'
+        "400":
+          description: Bad Request
+          schema:
+            $ref: '#/definitions/models.ErrorResponse'
+        "404":
+          description: Not Found
+          schema:
+            $ref: '#/definitions/models.ErrorResponse'
+      security:
+      - ApiKeyAuth: []
+      summary: Update waypoint
+      tags:
+      - waypoints
+securityDefinitions:
+  ApiKeyAuth:
+    in: header
+    name: X-API-Key
+    type: apiKey
+swagger: "2.0"
