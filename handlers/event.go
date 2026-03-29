@@ -45,10 +45,11 @@ func GetEvent(c fiber.Ctx) error {
 	var event models.VATSIMEvent
 	result := database.DB.
 		Preload("Airports").
-		Preload("Waypoints").
+		Preload("Airports.Waypoint").
 		Preload("RouteSegments").
 		Preload("RouteSegments.Tags").
 		Preload("RouteSegments.Locations").
+		Preload("RouteSegments.Locations.Waypoint").
 		Preload("RouteSegments.ProvidedFacilityProgression").
 		Preload("Sectors").
 		Preload("Sectors.SectorBoundaries").
@@ -175,10 +176,11 @@ func GetSimulatorData(c fiber.Ctx) error {
 	var event models.VATSIMEvent
 	result := database.DB.
 		Preload("Airports").
-		Preload("Waypoints").
+		Preload("Airports.Waypoint").
 		Preload("RouteSegments").
 		Preload("RouteSegments.Tags").
 		Preload("RouteSegments.Locations").
+		Preload("RouteSegments.Locations.Waypoint").
 		Preload("RouteSegments.ProvidedFacilityProgression").
 		Preload("RouteSegments.ProvidedFacilityProgression.SectorBoundaries").
 		Preload("RouteSegments.ProvidedFacilityProgression.SectorBoundaries.Coordinates").
@@ -194,10 +196,16 @@ func GetSimulatorData(c fiber.Ctx) error {
 	query := database.DB.
 		Preload("Slots").
 		Preload("Slots.DepartureAirport").
+		Preload("Slots.DepartureAirport.Waypoint").
 		Preload("Slots.ArrivalAirport").
+		Preload("Slots.ArrivalAirport.Waypoint").
 		Preload("Slots.RouteSegments").
+		Preload("Slots.RouteSegments.Tags").
 		Preload("Slots.RouteSegments.Locations").
-		Preload("ThroughputStates")
+		Preload("Slots.RouteSegments.Locations.Waypoint").
+		Preload("Slots.RouteSegments.ProvidedFacilityProgression").
+		Preload("ThroughputStates").
+		Preload("ThroughputSnapshots")
 
 	if revisionParam != "" {
 		num, err := strconv.ParseUint(revisionParam, 10, 64)

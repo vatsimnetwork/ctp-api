@@ -47,12 +47,21 @@ type routeSegmentInput struct {
 //	@Tags		route-segments
 //	@Security	ApiKeyAuth
 //	@Produce	json
+//	@Param		routeSegmentGroup	query		string	false	"Route Segment Group"
 //	@Success	200	{array}		models.RouteSegment
 //	@Failure	500	{object}	models.ErrorResponse
 //	@Router		/route-segments [get]
 func ListAllRouteSegments(c fiber.Ctx) error {
+	group := c.Query("routeSegmentGroup")
+
 	var segments []models.RouteSegment
-	if err := database.DB.Preload("Tags").Preload("Locations.Waypoint").Find(&segments).Error; err != nil {
+	query := database.DB.Preload("Tags").Preload("Locations.Waypoint")
+	
+	if group != "" {
+		query = query.Where("route_segment_group = ?", group)
+	}
+	
+	if err := query.Find(&segments).Error; err != nil {
 		return fiber.NewError(fiber.StatusInternalServerError, err.Error())
 	}
 	return c.JSON(segments)
@@ -65,6 +74,7 @@ func ListAllRouteSegments(c fiber.Ctx) error {
 //	@Security	ApiKeyAuth
 //	@Produce	json
 //	@Param		eventId	path		int	true	"Event ID"
+//	@Param		routeSegmentGroup	query		string	false	"Route Segment Group"
 //	@Success	200		{array}		models.RouteSegment
 //	@Failure	400		{object}	models.ErrorResponse
 //	@Router		/events/{eventId}/route-segments [get]
@@ -74,13 +84,20 @@ func ListEventRouteSegments(c fiber.Ctx) error {
 		return fiber.NewError(fiber.StatusBadRequest, "invalid event id")
 	}
 
+	group := c.Query("routeSegmentGroup")
+
 	var segments []models.RouteSegment
-	if err := database.DB.
+	query := database.DB.
 		Preload("Tags").
 		Preload("Locations.Waypoint").
 		Preload("ProvidedFacilityProgression").
-		Where("event_id = ?", eventID).
-		Find(&segments).Error; err != nil {
+		Where("event_id = ?", eventID)
+
+	if group != "" {
+		query = query.Where("route_segment_group = ?", group)
+	}
+
+	if err := query.Find(&segments).Error; err != nil {
 		return fiber.NewError(fiber.StatusInternalServerError, err.Error())
 	}
 	return c.JSON(segments)
@@ -132,6 +149,14 @@ func BatchSaveRouteSegments(c fiber.Ctx) error {
 
 	err := database.DB.Transaction(func(tx *gorm.DB) error {
 		for _, del := range payload.Deletes {
+			seg := models.RouteSegment{}
+			seg.ID = del
+			if err := tx.Model(&seg).Association("ProvidedFacilityProgression").Clear(); err != nil {
+				return err
+			}
+			if err := tx.Model(&seg).Association("Slots").Clear(); err != nil {
+				return err
+			}
 			if err := tx.Delete(&models.RouteSegment{}, del).Error; err != nil {
 				return err
 			}
@@ -319,6 +344,15 @@ func DeleteRouteSegment(c fiber.Ctx) error {
 	id, err := strconv.ParseUint(c.Params("id"), 10, 64)
 	if err != nil {
 		return fiber.NewError(fiber.StatusBadRequest, "invalid route segment id")
+	}
+
+	seg := models.RouteSegment{}
+	seg.ID = uint(id)
+	if err := database.DB.Model(&seg).Association("ProvidedFacilityProgression").Clear(); err != nil {
+		return fiber.NewError(fiber.StatusInternalServerError, err.Error())
+	}
+	if err := database.DB.Model(&seg).Association("Slots").Clear(); err != nil {
+		return fiber.NewError(fiber.StatusInternalServerError, err.Error())
 	}
 
 	result := database.DB.Delete(&models.RouteSegment{}, id)
