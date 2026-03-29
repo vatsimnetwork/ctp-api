@@ -31,6 +31,7 @@ func Connect() {
 
 	if err := DB.AutoMigrate(
 		&models.VATSIMEvent{},
+		&models.Waypoint{},
 		&models.Airport{},
 		&models.Location{},
 		&models.RouteSegment{},

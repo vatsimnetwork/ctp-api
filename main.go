@@ -1,7 +1,6 @@
 // @title			CTP API
 // @version		1.0.0
 // @description	Central data API for CTP (Cross the Pond) event management. All /api/* endpoints require an X-API-Key header.
-// @host			localhost:3000
 // @BasePath		/api
 // @securityDefinitions.apikey	ApiKeyAuth
 // @in							header
@@ -21,7 +20,7 @@ import (
 	"github.com/rs/zerolog/log"
 	"github.com/vatsimnetwork/ctp-api/config"
 	"github.com/vatsimnetwork/ctp-api/database"
-	_ "github.com/vatsimnetwork/ctp-api/docs"
+	"github.com/vatsimnetwork/ctp-api/docs"
 	"github.com/vatsimnetwork/ctp-api/handlers"
 	"github.com/vatsimnetwork/ctp-api/middleware"
 )
@@ -32,6 +31,7 @@ func main() {
 	log.Logger = zerolog.New(output).With().Timestamp().Logger()
 
 	config.Load()
+	docs.SwaggerInfo.Host = ""
 	database.Connect()
 
 	app := fiber.New(fiber.Config{
@@ -76,18 +76,16 @@ func main() {
 	api.Put("/events/:id", handlers.UpdateEvent)
 	api.Delete("/events/:id", handlers.DeleteEvent)
 	api.Get("/events/:id/simulator-data", handlers.GetSimulatorData)
+	api.Post("/events/:id/calculate-slots", handlers.CalculateSlots)
+	api.Post("/events/:id/simulate-slots", handlers.SimulateSlots)
 
 	api.Get("/events/:eventId/airports", handlers.ListAirports)
 	api.Post("/events/:eventId/airports", handlers.CreateAirport)
 	api.Put("/airports/:id", handlers.UpdateAirport)
 	api.Delete("/airports/:id", handlers.DeleteAirport)
 
-	api.Get("/events/:eventId/waypoints", handlers.ListWaypoints)
-	api.Post("/events/:eventId/waypoints", handlers.CreateWaypoint)
-	api.Post("/events/:eventId/waypoints/bulk", handlers.BulkCreateWaypoints)
+	api.Get("/waypoints", handlers.ListWaypoints)
 	api.Put("/waypoints/:id", handlers.UpdateWaypoint)
-	api.Delete("/waypoints/:id", handlers.DeleteWaypoint)
-	api.Delete("/events/:eventId/waypoints", handlers.DeleteAllWaypoints)
 
 	api.Get("/events/:eventId/sectors", handlers.ListSectors)
 	api.Post("/events/:eventId/sectors", handlers.CreateSector)

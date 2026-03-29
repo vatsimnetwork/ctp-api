@@ -23,7 +23,6 @@ type VATSIMEvent struct {
 	HighSimulationAccuracy                               bool                                      `json:"highSimulationAccuracy"`
 
 	Airports       []Airport      `gorm:"foreignKey:EventID;constraint:OnDelete:CASCADE;" json:"airports,omitempty"`
-	Waypoints      []Location     `gorm:"foreignKey:EventID;constraint:OnDelete:CASCADE;" json:"waypoints,omitempty"`
 	RouteSegments  []RouteSegment `gorm:"foreignKey:EventID;constraint:OnDelete:CASCADE;" json:"routeSegments,omitempty"`
 	Sectors        []Sector       `gorm:"foreignKey:EventID;constraint:OnDelete:CASCADE;" json:"sectors,omitempty"`
 	SlotRevisions  []SlotRevision `gorm:"foreignKey:EventID;constraint:OnDelete:CASCADE;" json:"slotRevisions,omitempty"`

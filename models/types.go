@@ -26,6 +26,11 @@ type BatchSaveRequest struct {
 	Deletes []uint         `json:"deletes"`
 }
 
+type SimulatorRequest struct {
+	Event    VATSIMEvent   `json:"event"`
+	Revision *SlotRevision `json:"revision"`
+}
+
 type Duration time.Duration
 
 func (d Duration) Value() (driver.Value, error) {

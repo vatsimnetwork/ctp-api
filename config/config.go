@@ -9,10 +9,10 @@ import (
 )
 
 type Config struct {
-	AppEnv         string
 	AppPort        string
 	DatabaseURL    string
 	AuthServiceURL string
+	SimulatorURL   string
 }
 
 var C *Config
@@ -21,14 +21,13 @@ func Load() {
 	_ = godotenv.Load()
 
 	C = &Config{
-		AppEnv:         getEnv("APP_ENV", "development"),
 		AppPort:        getEnv("APP_PORT", "8080"),
 		DatabaseURL:    requireEnv("DATABASE_URL"),
 		AuthServiceURL: requireEnv("AUTH_SERVICE_URL"),
+		SimulatorURL:   getEnv("SIMULATOR_URL", ""),
 	}
 
 	log.Info().
-		Str("env", C.AppEnv).
 		Str("port", C.AppPort).
 		Msg("config loaded")
 }

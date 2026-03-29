@@ -6,7 +6,18 @@ import (
 	"github.com/gofiber/fiber/v3"
 	"github.com/vatsimnetwork/ctp-api/database"
 	"github.com/vatsimnetwork/ctp-api/models"
+	"gorm.io/gorm/clause"
 )
+
+type airportInput struct {
+	WaypointID             int64   `json:"waypointId"`
+	Identifier             string  `json:"identifier"`
+	Latitude               float64 `json:"latitude"`
+	Longitude              float64 `json:"longitude"`
+	MaximumAircraftPerHour uint16  `json:"maximumAircraftPerHour"`
+	MaximumSlots           uint16  `json:"maximumSlots"`
+	NumberOfVotes          uint16  `json:"numberOfVotes"`
+}
 
 // ListAirports godoc
 //
@@ -25,7 +36,7 @@ func ListAirports(c fiber.Ctx) error {
 	}
 
 	var airports []models.Airport
-	if err := database.DB.Where("event_id = ?", eventID).Find(&airports).Error; err != nil {
+	if err := database.DB.Preload("Waypoint").Where("event_id = ?", eventID).Find(&airports).Error; err != nil {
 		return fiber.NewError(fiber.StatusInternalServerError, err.Error())
 	}
 	return c.JSON(airports)
@@ -33,13 +44,13 @@ func ListAirports(c fiber.Ctx) error {
 
 // CreateAirport godoc
 //
-//	@Summary	Create airport
+//	@Summary	Create airport for an event
 //	@Tags		airports
 //	@Security	ApiKeyAuth
 //	@Accept		json
 //	@Produce	json
 //	@Param		eventId	path		int				true	"Event ID"
-//	@Param		airport	body		models.Airport	true	"Airport"
+//	@Param		airport	body		airportInput	true	"Airport"
 //	@Success	201		{object}	models.Airport
 //	@Failure	400		{object}	models.ErrorResponse
 //	@Router		/events/{eventId}/airports [post]
@@ -49,16 +60,35 @@ func CreateAirport(c fiber.Ctx) error {
 		return fiber.NewError(fiber.StatusBadRequest, "invalid event id")
 	}
 
-	var airport models.Airport
-	if err := c.Bind().JSON(&airport); err != nil {
+	var input airportInput
+	if err := c.Bind().JSON(&input); err != nil {
 		return fiber.NewError(fiber.StatusBadRequest, err.Error())
 	}
 
-	airport.EventID = uint(eventID)
+	if err := database.DB.Clauses(clause.OnConflict{
+		Columns:   []clause.Column{{Name: "id"}},
+		DoUpdates: clause.AssignmentColumns([]string{"identifier", "latitude", "longitude"}),
+	}).Create(&models.Waypoint{
+		ID:         input.WaypointID,
+		Identifier: input.Identifier,
+		Latitude:   input.Latitude,
+		Longitude:  input.Longitude,
+	}).Error; err != nil {
+		return fiber.NewError(fiber.StatusInternalServerError, err.Error())
+	}
+
+	airport := models.Airport{
+		WaypointID:             input.WaypointID,
+		EventID:                uint(eventID),
+		MaximumAircraftPerHour: input.MaximumAircraftPerHour,
+		MaximumSlots:           input.MaximumSlots,
+		NumberOfVotes:          input.NumberOfVotes,
+	}
 	if err := database.DB.Create(&airport).Error; err != nil {
 		return fiber.NewError(fiber.StatusInternalServerError, err.Error())
 	}
 
+	database.DB.Preload("Waypoint").First(&airport, airport.ID)
 	return c.Status(fiber.StatusCreated).JSON(airport)
 }
 
@@ -70,7 +100,7 @@ func CreateAirport(c fiber.Ctx) error {
 //	@Accept		json
 //	@Produce	json
 //	@Param		id		path		int				true	"Airport ID"
-//	@Param		airport	body		models.Airport	true	"Airport fields to update"
+//	@Param		airport	body		airportInput	true	"Airport fields to update"
 //	@Success	200		{object}	models.Airport
 //	@Failure	400		{object}	models.ErrorResponse
 //	@Failure	404		{object}	models.ErrorResponse
@@ -86,17 +116,35 @@ func UpdateAirport(c fiber.Ctx) error {
 		return fiber.NewError(fiber.StatusNotFound, "airport not found")
 	}
 
-	var updates models.Airport
-	if err := c.Bind().JSON(&updates); err != nil {
+	var input airportInput
+	if err := c.Bind().JSON(&input); err != nil {
 		return fiber.NewError(fiber.StatusBadRequest, err.Error())
 	}
 
-	updates.ID = uint(id)
-	if err := database.DB.Model(&existing).Updates(updates).Error; err != nil {
+	if input.WaypointID != 0 {
+		if err := database.DB.Clauses(clause.OnConflict{
+			Columns:   []clause.Column{{Name: "id"}},
+			DoUpdates: clause.AssignmentColumns([]string{"identifier", "latitude", "longitude"}),
+		}).Create(&models.Waypoint{
+			ID:         input.WaypointID,
+			Identifier: input.Identifier,
+			Latitude:   input.Latitude,
+			Longitude:  input.Longitude,
+		}).Error; err != nil {
+			return fiber.NewError(fiber.StatusInternalServerError, err.Error())
+		}
+	}
+
+	if err := database.DB.Model(&existing).Updates(map[string]any{
+		"waypoint_id":               input.WaypointID,
+		"maximum_aircraft_per_hour": input.MaximumAircraftPerHour,
+		"maximum_slots":             input.MaximumSlots,
+		"number_of_votes":           input.NumberOfVotes,
+	}).Error; err != nil {
 		return fiber.NewError(fiber.StatusInternalServerError, err.Error())
 	}
 
-	database.DB.First(&existing, id)
+	database.DB.Preload("Waypoint").First(&existing, id)
 	return c.JSON(existing)
 }
 

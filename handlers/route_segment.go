@@ -7,7 +7,33 @@ import (
 	"github.com/vatsimnetwork/ctp-api/database"
 	"github.com/vatsimnetwork/ctp-api/models"
 	"gorm.io/gorm"
+	"gorm.io/gorm/clause"
 )
+
+type locationInput struct {
+	Identifier string  `json:"identifier"`
+	Latitude   float64 `json:"latitude"`
+	Longitude  float64 `json:"longitude"`
+	WaypointID int64   `json:"waypointId"`
+	SortOrder  uint    `json:"sortOrder"`
+}
+
+type routeSegmentInput struct {
+	ID                          uint            `json:"id"`
+	Identifier                  string          `json:"identifier"`
+	MaximumAircraftPerHour      uint16          `json:"maximumAircraftPerHour"`
+	MaximumSlots                uint16          `json:"maximumSlots"`
+	RouteString                 string          `json:"routeString"`
+	RouteSegmentGroup           string          `json:"routeSegmentGroup"`
+	Color                       string          `json:"color"`
+	Enabled                     bool            `json:"enabled"`
+	Facilities                  string          `json:"facilities"`
+	RouteSegmentTags            []string        `json:"routeSegmentTags"`
+	ProvidedFacilityProgression []models.Sector `json:"providedFacilityProgression"`
+	Locations                   []locationInput `json:"locations"`
+	RouteRevision               uint            `json:"routeRevision"`
+	EventID                     *uint           `json:"eventId,omitempty"`
+}
 
 // ListAllRouteSegments godoc
 //
@@ -20,7 +46,7 @@ import (
 //	@Router		/route-segments [get]
 func ListAllRouteSegments(c fiber.Ctx) error {
 	var segments []models.RouteSegment
-	if err := database.DB.Preload("Tags").Preload("Locations").Find(&segments).Error; err != nil {
+	if err := database.DB.Preload("Tags").Preload("Locations.Waypoint").Find(&segments).Error; err != nil {
 		return fiber.NewError(fiber.StatusInternalServerError, err.Error())
 	}
 	return c.JSON(segments)
@@ -45,7 +71,7 @@ func ListEventRouteSegments(c fiber.Ctx) error {
 	var segments []models.RouteSegment
 	if err := database.DB.
 		Preload("Tags").
-		Preload("Locations").
+		Preload("Locations.Waypoint").
 		Preload("ProvidedFacilityProgression").
 		Where("event_id = ?", eventID).
 		Find(&segments).Error; err != nil {
@@ -85,14 +111,14 @@ func CreateRouteSegment(c fiber.Ctx) error {
 //	@Security	ApiKeyAuth
 //	@Accept		json
 //	@Produce	json
-//	@Param		payload	body		models.BatchSaveRequest	true	"Batch payload: updates (array of RouteSegment) and deletes (array of IDs)"
-//	@Success	200		{object}	models.SuccessResponse									"success: true"
+//	@Param		payload	body		models.BatchSaveRequest	true	"Batch payload"
+//	@Success	200		{object}	models.SuccessResponse
 //	@Failure	400		{object}	models.ErrorResponse
 //	@Router		/route-segments/save [post]
 func BatchSaveRouteSegments(c fiber.Ctx) error {
 	var payload struct {
-		Updates []models.RouteSegment `json:"updates"`
-		Deletes []uint                `json:"deletes"`
+		Updates []routeSegmentInput `json:"updates"`
+		Deletes []uint              `json:"deletes"`
 	}
 	if err := c.Bind().JSON(&payload); err != nil {
 		return fiber.NewError(fiber.StatusBadRequest, err.Error())
@@ -105,14 +131,78 @@ func BatchSaveRouteSegments(c fiber.Ctx) error {
 			}
 		}
 
-		for i := range payload.Updates {
-			seg := &payload.Updates[i]
-			if seg.ID == 0 {
-				if err := tx.Create(seg).Error; err != nil {
+		waypointMap := map[int64]models.Waypoint{}
+		for _, seg := range payload.Updates {
+			for _, l := range seg.Locations {
+				if l.WaypointID != 0 {
+					waypointMap[l.WaypointID] = models.Waypoint{
+						ID:         l.WaypointID,
+						Identifier: l.Identifier,
+						Latitude:   l.Latitude,
+						Longitude:  l.Longitude,
+					}
+				}
+			}
+		}
+		if len(waypointMap) > 0 {
+			waypoints := make([]models.Waypoint, 0, len(waypointMap))
+			for _, w := range waypointMap {
+				waypoints = append(waypoints, w)
+			}
+			if err := tx.Clauses(clause.OnConflict{
+				Columns:   []clause.Column{{Name: "id"}},
+				DoUpdates: clause.AssignmentColumns([]string{"identifier", "latitude", "longitude"}),
+			}).Create(&waypoints).Error; err != nil {
+				return err
+			}
+		}
+
+		for _, input := range payload.Updates {
+			seg := models.RouteSegment{
+				RouteString:                 input.RouteString,
+				RouteSegmentGroup:           input.RouteSegmentGroup,
+				Color:                       input.Color,
+				Enabled:                     input.Enabled,
+				Facilities:                  input.Facilities,
+				ProvidedFacilityProgression: input.ProvidedFacilityProgression,
+				RouteRevision:               input.RouteRevision,
+				EventID:                     input.EventID,
+			}
+			seg.Identifier = input.Identifier
+			seg.MaximumAircraftPerHour = input.MaximumAircraftPerHour
+
+			if input.ID == 0 {
+				if err := tx.Session(&gorm.Session{FullSaveAssociations: true}).Create(&seg).Error; err != nil {
 					return err
 				}
 			} else {
-				if err := tx.Session(&gorm.Session{FullSaveAssociations: true}).Save(seg).Error; err != nil {
+				seg.ID = input.ID
+				tx.Where("route_segment_id = ?", input.ID).Delete(&models.RouteSegmentTag{})
+				tx.Where("route_segment_id = ?", input.ID).Delete(&models.Location{})
+				if err := tx.Session(&gorm.Session{FullSaveAssociations: true}).Save(&seg).Error; err != nil {
+					return err
+				}
+			}
+
+			tags := make([]models.RouteSegmentTag, 0, len(input.RouteSegmentTags))
+			for _, t := range input.RouteSegmentTags {
+				tags = append(tags, models.RouteSegmentTag{RouteSegmentID: seg.ID, Tag: t})
+			}
+			if len(tags) > 0 {
+				if err := tx.Create(&tags).Error; err != nil {
+					return err
+				}
+			}
+
+			for _, l := range input.Locations {
+				if l.WaypointID == 0 {
+					continue
+				}
+				if err := tx.Create(&models.Location{
+					RouteSegmentID: seg.ID,
+					WaypointID:     l.WaypointID,
+					SortOrder:      l.SortOrder,
+				}).Error; err != nil {
 					return err
 				}
 			}
@@ -162,7 +252,7 @@ func UpdateRouteSegment(c fiber.Ctx) error {
 		return fiber.NewError(fiber.StatusInternalServerError, err.Error())
 	}
 
-	database.DB.Preload("Tags").Preload("Locations").Preload("ProvidedFacilityProgression").First(&existing, id)
+	database.DB.Preload("Tags").Preload("Locations.Waypoint").Preload("ProvidedFacilityProgression").First(&existing, id)
 	return c.JSON(existing)
 }
 
