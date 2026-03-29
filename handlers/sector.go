@@ -28,7 +28,7 @@ func ListSectors(c fiber.Ctx) error {
 	if err := database.DB.
 		Preload("SectorBoundaries").
 		Preload("SectorBoundaries.Coordinates").
-		Where("event_id = ?", eventID).
+		Where("event_id = ? OR event_id IS NULL", eventID).
 		Find(&sectors).Error; err != nil {
 		return fiber.NewError(fiber.StatusInternalServerError, err.Error())
 	}
@@ -58,7 +58,8 @@ func CreateSector(c fiber.Ctx) error {
 		return fiber.NewError(fiber.StatusBadRequest, err.Error())
 	}
 
-	sector.EventID = uint(eventID)
+	eid := uint(eventID)
+	sector.EventID = &eid
 	if err := database.DB.Create(&sector).Error; err != nil {
 		return fiber.NewError(fiber.StatusInternalServerError, err.Error())
 	}

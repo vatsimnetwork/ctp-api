@@ -88,6 +88,13 @@ func CreateRouteRevision(c fiber.Ctx) error {
 		}
 
 		revision.Entries = entries
+
+		if eventIDStr := c.Query("eventId"); eventIDStr != "" {
+			if eid, err := strconv.ParseUint(eventIDStr, 10, 64); err == nil {
+				tx.Model(&models.VATSIMEvent{}).Where("id = ?", eid).Update("route_revision", nextNumber)
+			}
+		}
+
 		return nil
 	})
 

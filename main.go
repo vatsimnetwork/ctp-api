@@ -76,6 +76,8 @@ func main() {
 	api.Put("/events/:id", handlers.UpdateEvent)
 	api.Delete("/events/:id", handlers.DeleteEvent)
 	api.Get("/events/:id/simulator-data", handlers.GetSimulatorData)
+	api.Get("/events/:id/calculate-slots/preview", handlers.PreviewCalculatePayload)
+	api.Get("/events/:id/simulate-slots/preview", handlers.PreviewSimulatePayload)
 	api.Post("/events/:id/calculate-slots", handlers.CalculateSlots)
 	api.Post("/events/:id/simulate-slots", handlers.SimulateSlots)
 

@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"fmt"
 	"io"
 	"net/http"
 	"sort"
@@ -15,6 +16,7 @@ import (
 	"github.com/vatsimnetwork/ctp-api/config"
 	"github.com/vatsimnetwork/ctp-api/database"
 	"github.com/vatsimnetwork/ctp-api/models"
+	"gorm.io/gorm"
 )
 
 const simulatorTimeout = 2 * time.Minute
@@ -61,27 +63,27 @@ type simSector struct {
 }
 
 type simRouteSegment struct {
-	Id                          uint       `json:"id"`
-	Identifier                  string     `json:"identifier"`
-	MaximumAircraftPerHour      uint16     `json:"maximumAircraftPerHour"`
-	MaximumSlots                uint16     `json:"maximumSlots"`
-	RouteString                 string     `json:"routeString"`
-	RouteSegmentGroup           string     `json:"routeSegmentGroup"`
-	Color                       string     `json:"color"`
-	Enabled                     bool       `json:"enabled"`
-	RouteSegmentTags            []string   `json:"routeSegmentTags"`
-	ProvidedFacilityProgression []simSector `json:"providedFacilityProgression"`
-	Locations                   []int64    `json:"locations"`
-	RouteRevision               uint       `json:"routeRevision"`
+	Id                          uint     `json:"id"`
+	Identifier                  string   `json:"identifier"`
+	MaximumAircraftPerHour      uint16   `json:"maximumAircraftPerHour"`
+	MaximumSlots                uint16   `json:"maximumSlots"`
+	RouteString                 string   `json:"routeString"`
+	RouteSegmentGroup           string   `json:"routeSegmentGroup"`
+	Color                       string   `json:"color"`
+	Enabled                     bool     `json:"enabled"`
+	RouteSegmentTags            []string `json:"routeSegmentTags"`
+	ProvidedFacilityProgression []uint   `json:"providedFacilityProgression"`
+	Locations                   []int64  `json:"locations"`
+	RouteRevision               uint     `json:"routeRevision"`
 }
 
 type simSlot struct {
-	Id                   uint              `json:"id"`
-	DepartureTime        string            `json:"departureTime"`
-	ProjectedArrivalTime string            `json:"projectedArrivalTime"`
-	DepartureAirport     simAirport        `json:"departureAirport"`
-	ArrivalAirport       simAirport        `json:"arrivalAirport"`
-	RouteSegments        []simRouteSegment `json:"routeSegments"`
+	Id                   uint   `json:"id"`
+	DepartureTime        string `json:"departureTime"`
+	ProjectedArrivalTime string `json:"projectedArrivalTime"`
+	DepartureAirport     int64  `json:"departureAirport"` // airport WaypointID
+	ArrivalAirport       int64  `json:"arrivalAirport"`   // airport WaypointID
+	RouteSegments        []uint `json:"routeSegments"`    // route segment IDs
 }
 
 type simEvent struct {
@@ -90,12 +92,46 @@ type simEvent struct {
 	RouteRevision         uint                     `json:"routeRevision"`
 	SlotRevision          uint                     `json:"slotRevision"`
 	Date                  string                   `json:"date"`
-	DepartureTimeWindow   float64                  `json:"departureTimeWindow"`
+	DepartureTimeWindow   string                   `json:"departureTimeWindow"` // "hh:mm:ss" (C# TimeSpan)
 	CalculationParameters simCalculationParameters `json:"calculationParameters"`
 	Airports              []simAirport             `json:"airports"`
 	Waypoints             []simWaypoint            `json:"waypoints"`
 	RouteSegments         []simRouteSegment        `json:"routeSegments"`
+	Sectors               []simSector              `json:"sectors"`
 	Slots                 []simSlot                `json:"slots"`
+}
+
+type simResponseThroughput struct {
+	Id             int64          `json:"id"`
+	MaximumSlots   uint16         `json:"maximumSlots"`
+	SlotsAllocated uint16         `json:"slotsAllocated"`
+	SlotsFrames    map[int][]uint `json:"slotsAnalysisFramesViaMinutesFromSynchronizationTime"`
+}
+
+type simResponseAirport struct {
+	simResponseThroughput
+	DepartureTimeWindowStart time.Time `json:"departureTimeWindowStart"`
+}
+
+type simResponseSlot struct {
+	DepartureTime        time.Time `json:"departureTime"`
+	ProjectedArrivalTime time.Time `json:"projectedArrivalTime"`
+	DepartureAirport     int64     `json:"departureAirport"`
+	ArrivalAirport       int64     `json:"arrivalAirport"`
+	RouteSegments        []uint    `json:"routeSegments"`
+}
+
+type simResponseCalcParams struct {
+	SlotGenerationOutputCommentary string `json:"slotGenerationOutputCommentary"`
+	SimulationOutputCommentary     string `json:"simulationOutputCommentary"`
+}
+
+type simResponseEvent struct {
+	CalculationParameters simResponseCalcParams   `json:"calculationParameters"`
+	Airports              []simResponseAirport    `json:"airports"`
+	Waypoints             []simResponseThroughput `json:"waypoints"`
+	RouteSegments         []simResponseThroughput `json:"routeSegments"`
+	Slots                 []simResponseSlot       `json:"slots"`
 }
 
 func mapAirport(a models.Airport) simAirport {
@@ -125,13 +161,9 @@ func mapRouteSegment(r models.RouteSegment, airportWaypointIDs map[int64]bool) s
 		locs = append(locs, l.WaypointID)
 	}
 
-	pfp := make([]simSector, 0, len(r.ProvidedFacilityProgression))
+	pfp := make([]uint, 0, len(r.ProvidedFacilityProgression))
 	for _, s := range r.ProvidedFacilityProgression {
-		pfp = append(pfp, simSector{
-			Id:                     s.ID,
-			Identifier:             s.Identifier,
-			MaximumAircraftPerHour: s.MaximumAircraftPerHour,
-		})
+		pfp = append(pfp, s.ID)
 	}
 
 	return simRouteSegment{
@@ -149,18 +181,26 @@ func mapRouteSegment(r models.RouteSegment, airportWaypointIDs map[int64]bool) s
 	}
 }
 
-func mapSlot(s models.Slot, airportWaypointIDs map[int64]bool) simSlot {
-	segs := make([]simRouteSegment, 0, len(s.RouteSegments))
-	for _, r := range s.RouteSegments {
-		segs = append(segs, mapRouteSegment(r, airportWaypointIDs))
+func mapSlot(s models.Slot) simSlot {
+	rsIDs := make([]uint, 0, len(s.RouteSegments))
+	for _, rs := range s.RouteSegments {
+		rsIDs = append(rsIDs, rs.ID)
+	}
+	depTime := s.DepartureTime
+	arrTime := s.ProjectedArrivalTime
+	if depTime.IsZero() {
+		depTime = time.Date(2000, 1, 1, 0, 0, 0, 0, time.UTC)
+	}
+	if arrTime.IsZero() {
+		arrTime = time.Date(2000, 1, 1, 0, 0, 0, 0, time.UTC)
 	}
 	return simSlot{
 		Id:                   s.ID,
-		DepartureTime:        s.DepartureTime.UTC().Format(time.RFC3339),
-		ProjectedArrivalTime: s.ProjectedArrivalTime.UTC().Format(time.RFC3339),
-		DepartureAirport:     mapAirport(s.DepartureAirport),
-		ArrivalAirport:       mapAirport(s.ArrivalAirport),
-		RouteSegments:        segs,
+		DepartureTime:        depTime.UTC().Format(time.RFC3339),
+		ProjectedArrivalTime: arrTime.UTC().Format(time.RFC3339),
+		DepartureAirport:     s.DepartureAirport.WaypointID,
+		ArrivalAirport:       s.ArrivalAirport.WaypointID,
+		RouteSegments:        rsIDs,
 	}
 }
 
@@ -169,6 +209,14 @@ func normalizeTimeOfDay(s string) string {
 		return s + ":00"
 	}
 	return s
+}
+
+func formatDepartureTimeWindow(d models.Duration) string {
+	total := time.Duration(d)
+	h := int(total.Hours())
+	m := int(total.Minutes()) % 60
+	s := int(total.Seconds()) % 60
+	return fmt.Sprintf("%02d:%02d:%02d", h, m, s)
 }
 
 func buildSimEvent(event models.VATSIMEvent, revision *models.SlotRevision, includeSlots bool) simEvent {
@@ -208,13 +256,31 @@ func buildSimEvent(event models.VATSIMEvent, revision *models.SlotRevision, incl
 		routeSegments = append(routeSegments, mapRouteSegment(r, airportWaypointIDs))
 	}
 
+	sectorByID := make(map[uint]simSector)
+	for _, r := range event.RouteSegments {
+		for _, s := range r.ProvidedFacilityProgression {
+			if _, exists := sectorByID[s.ID]; !exists {
+				sectorByID[s.ID] = simSector{
+					Id:                     s.ID,
+					Identifier:             s.Identifier,
+					MaximumAircraftPerHour: s.MaximumAircraftPerHour,
+				}
+			}
+		}
+	}
+	sectors := make([]simSector, 0, len(sectorByID))
+	for _, s := range sectorByID {
+		sectors = append(sectors, s)
+	}
+	sort.Slice(sectors, func(i, j int) bool { return sectors[i].Id < sectors[j].Id })
+
 	slots := []simSlot{}
 	var slotRevisionNumber uint
 	if revision != nil {
 		slotRevisionNumber = revision.Number
 		if includeSlots {
 			for _, s := range revision.Slots {
-				slots = append(slots, mapSlot(s, airportWaypointIDs))
+				slots = append(slots, mapSlot(s))
 			}
 		}
 	}
@@ -225,7 +291,7 @@ func buildSimEvent(event models.VATSIMEvent, revision *models.SlotRevision, incl
 		RouteRevision:       event.RouteRevision,
 		SlotRevision:        slotRevisionNumber,
 		Date:                event.Date.Format("2006-01-02"),
-		DepartureTimeWindow: time.Duration(event.DepartureTimeWindow).Seconds(),
+		DepartureTimeWindow: formatDepartureTimeWindow(event.DepartureTimeWindow),
 		CalculationParameters: simCalculationParameters{
 			RecalculateMaximumAirportSlots:                        event.RecalculateMaximumAirportSlots,
 			IntendedSlotGenerationMode:                            uint(event.IntendedSlotGenerationMode),
@@ -243,6 +309,7 @@ func buildSimEvent(event models.VATSIMEvent, revision *models.SlotRevision, incl
 		Airports:      airports,
 		Waypoints:     waypoints,
 		RouteSegments: routeSegments,
+		Sectors:       sectors,
 		Slots:         slots,
 	}
 }
@@ -279,7 +346,183 @@ func fetchSimulatorData(id uint64) (*models.VATSIMEvent, *models.SlotRevision, e
 	return &event, &revision, nil
 }
 
-func forwardToSimulator(c fiber.Ctx, path string, includeSlots bool) error {
+func callSimulator(ctx context.Context, path string, body []byte) ([]byte, int, error) {
+	req, err := http.NewRequestWithContext(ctx, http.MethodPost, config.C.SimulatorURL+path, bytes.NewReader(body))
+	if err != nil {
+		return nil, 0, err
+	}
+	req.Header.Set("Content-Type", "application/json")
+
+	resp, err := http.DefaultClient.Do(req)
+	if err != nil {
+		return nil, 0, err
+	}
+	defer resp.Body.Close()
+
+	respBody, err := io.ReadAll(resp.Body)
+	return respBody, resp.StatusCode, err
+}
+
+func airportWaypointLookup(tx *gorm.DB, eventID uint) map[int64]uint {
+	var airports []models.Airport
+	tx.Where("event_id = ?", eventID).Find(&airports)
+	m := make(map[int64]uint, len(airports))
+	for _, a := range airports {
+		m[a.WaypointID] = a.ID
+	}
+	return m
+}
+
+func writeThroughputStates(tx *gorm.DB, revisionID uint, resp simResponseEvent, airportByWaypoint map[int64]uint) error {
+	for _, a := range resp.Airports {
+		var ts *time.Time
+		if !a.DepartureTimeWindowStart.IsZero() {
+			ts = &a.DepartureTimeWindowStart
+		}
+		if err := tx.Create(&models.ThroughputState{
+			SlotRevisionID:           revisionID,
+			ThroughputPointType:      "airport",
+			ThroughputPointID:        int64(airportByWaypoint[a.Id]),
+			MaximumSlots:             a.MaximumSlots,
+			SlotsAllocated:           a.SlotsAllocated,
+			DepartureTimeWindowStart: ts,
+		}).Error; err != nil {
+			return err
+		}
+	}
+	for _, w := range resp.Waypoints {
+		if err := tx.Create(&models.ThroughputState{
+			SlotRevisionID:      revisionID,
+			ThroughputPointType: "waypoint",
+			ThroughputPointID:   w.Id,
+			MaximumSlots:        w.MaximumSlots,
+			SlotsAllocated:      w.SlotsAllocated,
+		}).Error; err != nil {
+			return err
+		}
+	}
+	for _, r := range resp.RouteSegments {
+		if err := tx.Create(&models.ThroughputState{
+			SlotRevisionID:      revisionID,
+			ThroughputPointType: "route_segment",
+			ThroughputPointID:   r.Id,
+			MaximumSlots:        r.MaximumSlots,
+			SlotsAllocated:      r.SlotsAllocated,
+		}).Error; err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+func writeThroughputSnapshots(tx *gorm.DB, revisionID uint, resp simResponseEvent, airportByWaypoint map[int64]uint) error {
+	write := func(pointType string, pointID int64, frames map[int][]uint) error {
+		for minuteOffset, slotIDs := range frames {
+			for _, slotID := range slotIDs {
+				if err := tx.Create(&models.ThroughputSnapshot{
+					SlotRevisionID:      revisionID,
+					ThroughputPointType: pointType,
+					ThroughputPointID:   pointID,
+					MinuteOffset:        minuteOffset,
+					SlotID:              slotID,
+				}).Error; err != nil {
+					return err
+				}
+			}
+		}
+		return nil
+	}
+
+	for _, a := range resp.Airports {
+		if err := write("airport", int64(airportByWaypoint[a.Id]), a.SlotsFrames); err != nil {
+			return err
+		}
+	}
+	for _, w := range resp.Waypoints {
+		if err := write("waypoint", w.Id, w.SlotsFrames); err != nil {
+			return err
+		}
+	}
+	for _, r := range resp.RouteSegments {
+		if err := write("route_segment", r.Id, r.SlotsFrames); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+func saveCalculationResult(eventID uint, resp simResponseEvent, commentary string) (uint, error) {
+	var revisionID uint
+	err := database.DB.Transaction(func(tx *gorm.DB) error {
+		var maxNumber uint
+		tx.Model(&models.SlotRevision{}).Where("event_id = ?", eventID).Select("COALESCE(MAX(number), 0)").Scan(&maxNumber)
+
+		revision := models.SlotRevision{
+			EventID:                        eventID,
+			Number:                         maxNumber + 1,
+			SlotGenerationOutputCommentary: commentary,
+		}
+		if err := tx.Create(&revision).Error; err != nil {
+			return err
+		}
+		revisionID = revision.ID
+
+		airportByWaypoint := airportWaypointLookup(tx, eventID)
+
+		for _, s := range resp.Slots {
+			slot := models.Slot{
+				SlotRevisionID:       revision.ID,
+				DepartureTime:        s.DepartureTime,
+				ProjectedArrivalTime: s.ProjectedArrivalTime,
+				DepartureAirportID:   airportByWaypoint[s.DepartureAirport],
+				ArrivalAirportID:     airportByWaypoint[s.ArrivalAirport],
+			}
+			if err := tx.Create(&slot).Error; err != nil {
+				return err
+			}
+			if len(s.RouteSegments) > 0 {
+				rsegs := make([]models.RouteSegment, 0, len(s.RouteSegments))
+				for _, rsID := range s.RouteSegments {
+					rsegs = append(rsegs, models.RouteSegment{ThroughputPoint: models.ThroughputPoint{ID: rsID}})
+				}
+				if err := tx.Model(&slot).Association("RouteSegments").Append(rsegs); err != nil {
+					return err
+				}
+			}
+		}
+
+		return writeThroughputStates(tx, revision.ID, resp, airportByWaypoint)
+	})
+	return revisionID, err
+}
+
+func saveSimulationResult(eventID uint, resp simResponseEvent, commentary string) (uint, error) {
+	var revisionID uint
+	err := database.DB.Transaction(func(tx *gorm.DB) error {
+		var revision models.SlotRevision
+		if err := tx.Where("event_id = ?", eventID).Order("number DESC").First(&revision).Error; err != nil {
+			return fiber.NewError(fiber.StatusNotFound, "no slot revision found to attach simulation results to")
+		}
+		revisionID = revision.ID
+
+		if err := tx.Model(&revision).Update("simulation_output_commentary", commentary).Error; err != nil {
+			return err
+		}
+
+		airportByWaypoint := airportWaypointLookup(tx, eventID)
+
+		tx.Where("slot_revision_id = ?", revision.ID).Delete(&models.ThroughputState{})
+		tx.Where("slot_revision_id = ?", revision.ID).Delete(&models.ThroughputSnapshot{})
+
+		if err := writeThroughputStates(tx, revision.ID, resp, airportByWaypoint); err != nil {
+			return err
+		}
+		return writeThroughputSnapshots(tx, revision.ID, resp, airportByWaypoint)
+	})
+	return revisionID, err
+}
+
+func invokeSimulator(c fiber.Ctx, path string, includeSlots bool, save func(uint, simResponseEvent, string) (uint, error)) error {
 	if config.C.SimulatorURL == "" {
 		return fiber.NewError(fiber.StatusServiceUnavailable, "simulator not configured")
 	}
@@ -304,42 +547,96 @@ func forwardToSimulator(c fiber.Ctx, path string, includeSlots bool) error {
 	ctx, cancel := context.WithTimeout(c.Context(), simulatorTimeout)
 	defer cancel()
 
-	req, err := http.NewRequestWithContext(ctx, http.MethodPost, config.C.SimulatorURL+path, bytes.NewReader(body))
-	if err != nil {
-		return fiber.NewError(fiber.StatusInternalServerError, "failed to build simulator request")
-	}
-	req.Header.Set("Content-Type", "application/json")
-
-	resp, err := http.DefaultClient.Do(req)
+	respBody, statusCode, err := callSimulator(ctx, path, body)
 	if err != nil {
 		return fiber.NewError(fiber.StatusBadGateway, "simulator request failed: "+err.Error())
 	}
-	defer resp.Body.Close()
-
-	respBody, err := io.ReadAll(resp.Body)
-	if err != nil {
-		return fiber.NewError(fiber.StatusBadGateway, "failed to read simulator response")
+	if statusCode == http.StatusInternalServerError {
+		return fiber.NewError(fiber.StatusBadGateway, "simulator calculation error: "+string(respBody))
+	}
+	if statusCode != http.StatusOK {
+		return fiber.NewError(fiber.StatusBadGateway, fmt.Sprintf("simulator returned %d", statusCode))
 	}
 
-	c.Set("Content-Type", "application/json")
-	return c.Status(resp.StatusCode).Send(respBody)
+	var simResp simResponseEvent
+	if err := json.Unmarshal(respBody, &simResp); err != nil {
+		return fiber.NewError(fiber.StatusInternalServerError, "failed to parse simulator response: "+err.Error())
+	}
+
+	commentary := simResp.CalculationParameters.SlotGenerationOutputCommentary
+	if path == "/simulateEvent" {
+		commentary = simResp.CalculationParameters.SimulationOutputCommentary
+	}
+
+	revisionID, err := save(uint(id), simResp, commentary)
+	if err != nil {
+		return fiber.NewError(fiber.StatusInternalServerError, "failed to save simulator results: "+err.Error())
+	}
+
+	return c.JSON(fiber.Map{"slotRevisionId": revisionID})
 }
 
-// CalculateSlots godoc
+// PreviewCalculatePayload godoc
 //
-//	@Summary	Send event data to simulator to calculate optimal slots
+//	@Summary	Preview the payload that would be sent to /createSlotDistribution
 //	@Tags		simulator
 //	@Security	ApiKeyAuth
 //	@Produce	json
 //	@Param		id	path		int		true	"Event ID"
-//	@Success	200	{object}	object	"Simulator response with calculated slots"
+//	@Success	200	{object}	object
+//	@Failure	400	{object}	models.ErrorResponse
+//	@Failure	404	{object}	models.ErrorResponse
+//	@Router		/events/{id}/calculate-slots/preview [get]
+func PreviewCalculatePayload(c fiber.Ctx) error {
+	id, err := strconv.ParseUint(c.Params("id"), 10, 64)
+	if err != nil {
+		return fiber.NewError(fiber.StatusBadRequest, "invalid event id")
+	}
+	event, revision, err := fetchSimulatorData(id)
+	if err != nil {
+		return err
+	}
+	return c.JSON(buildSimEvent(*event, revision, false))
+}
+
+// PreviewSimulatePayload godoc
+//
+//	@Summary	Preview the payload that would be sent to /simulateEvent (includes slots)
+//	@Tags		simulator
+//	@Security	ApiKeyAuth
+//	@Produce	json
+//	@Param		id	path		int		true	"Event ID"
+//	@Success	200	{object}	object
+//	@Failure	400	{object}	models.ErrorResponse
+//	@Failure	404	{object}	models.ErrorResponse
+//	@Router		/events/{id}/simulate-slots/preview [get]
+func PreviewSimulatePayload(c fiber.Ctx) error {
+	id, err := strconv.ParseUint(c.Params("id"), 10, 64)
+	if err != nil {
+		return fiber.NewError(fiber.StatusBadRequest, "invalid event id")
+	}
+	event, revision, err := fetchSimulatorData(id)
+	if err != nil {
+		return err
+	}
+	return c.JSON(buildSimEvent(*event, revision, true))
+}
+
+// CalculateSlots godoc
+//
+//	@Summary	Send event data to simulator to calculate slot distribution
+//	@Tags		simulator
+//	@Security	ApiKeyAuth
+//	@Produce	json
+//	@Param		id	path		int		true	"Event ID"
+//	@Success	200	{object}	object	"{ slotRevisionId: uint }"
 //	@Failure	400	{object}	models.ErrorResponse
 //	@Failure	404	{object}	models.ErrorResponse
 //	@Failure	502	{object}	models.ErrorResponse
 //	@Failure	503	{object}	models.ErrorResponse
 //	@Router		/events/{id}/calculate-slots [post]
 func CalculateSlots(c fiber.Ctx) error {
-	return forwardToSimulator(c, "/calculate-slots", false)
+	return invokeSimulator(c, "/createSlotDistribution", false, saveCalculationResult)
 }
 
 // SimulateSlots godoc
@@ -349,12 +646,12 @@ func CalculateSlots(c fiber.Ctx) error {
 //	@Security	ApiKeyAuth
 //	@Produce	json
 //	@Param		id	path		int		true	"Event ID"
-//	@Success	200	{object}	object	"Simulator response with simulation results"
+//	@Success	200	{object}	object	"{ slotRevisionId: uint }"
 //	@Failure	400	{object}	models.ErrorResponse
 //	@Failure	404	{object}	models.ErrorResponse
 //	@Failure	502	{object}	models.ErrorResponse
 //	@Failure	503	{object}	models.ErrorResponse
 //	@Router		/events/{id}/simulate-slots [post]
 func SimulateSlots(c fiber.Ctx) error {
-	return forwardToSimulator(c, "/simulate-slots", true)
+	return invokeSimulator(c, "/simulateEvent", true, saveSimulationResult)
 }

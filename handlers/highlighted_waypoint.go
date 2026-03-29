@@ -7,6 +7,15 @@ import (
 	"gorm.io/gorm/clause"
 )
 
+type highlightedWaypointInput struct {
+	Identifier string  `json:"identifier"`
+	Color      string  `json:"color"`
+	Note       string  `json:"note"`
+	WaypointID *int64  `json:"waypointId"`
+	Latitude   float64 `json:"latitude"`
+	Longitude  float64 `json:"longitude"`
+}
+
 // ListHighlightedWaypoints godoc
 //
 //	@Summary	List all highlighted waypoints
@@ -36,14 +45,49 @@ func ListHighlightedWaypoints(c fiber.Ctx) error {
 //	@Failure	400			{object}	models.ErrorResponse
 //	@Router		/highlighted-waypoints [post]
 func UpsertHighlightedWaypoint(c fiber.Ctx) error {
-	var wp models.HighlightedWaypoint
-	if err := c.Bind().JSON(&wp); err != nil {
+	var input highlightedWaypointInput
+	if err := c.Bind().JSON(&input); err != nil {
 		return fiber.NewError(fiber.StatusBadRequest, err.Error())
+	}
+
+	waypointID := input.WaypointID
+	lat, lon := input.Latitude, input.Longitude
+
+	var existing models.Waypoint
+	if database.DB.Where("identifier = ?", input.Identifier).First(&existing).Error == nil {
+		if waypointID == nil {
+			waypointID = &existing.ID
+		}
+		if lat == 0 {
+			lat = existing.Latitude
+		}
+		if lon == 0 {
+			lon = existing.Longitude
+		}
+	}
+
+	if waypointID != nil {
+		database.DB.Clauses(clause.OnConflict{
+			Columns:   []clause.Column{{Name: "id"}},
+			DoUpdates: clause.AssignmentColumns([]string{"identifier", "latitude", "longitude"}),
+		}).Create(&models.Waypoint{
+			ID:         *waypointID,
+			Identifier: input.Identifier,
+			Latitude:   lat,
+			Longitude:  lon,
+		})
+	}
+
+	wp := models.HighlightedWaypoint{
+		Identifier: input.Identifier,
+		Color:      input.Color,
+		Note:       input.Note,
+		WaypointID: waypointID,
 	}
 
 	result := database.DB.Clauses(clause.OnConflict{
 		Columns:   []clause.Column{{Name: "identifier"}},
-		DoUpdates: clause.AssignmentColumns([]string{"color", "note"}),
+		DoUpdates: clause.AssignmentColumns([]string{"color", "note", "waypoint_id"}),
 	}).Create(&wp)
 
 	if result.Error != nil {

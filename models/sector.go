@@ -3,7 +3,7 @@ package models
 type Sector struct {
 	ThroughputPoint
 	SectorBoundaries []SectorBoundary `gorm:"foreignKey:SectorID;constraint:OnDelete:CASCADE;" json:"sectorBoundaries,omitempty"`
-	EventID          uint             `gorm:"index;not null" json:"eventId"`
+	EventID          *uint            `gorm:"index" json:"eventId,omitempty"`
 }
 
 type SectorBoundary struct {

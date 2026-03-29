@@ -30,6 +30,8 @@ type HighlightedWaypoint struct {
 	Color      string    `gorm:"default:'#f97316'" json:"color"`
 	Note       string    `json:"note"`
 	CreatedAt  time.Time `json:"createdAt"`
+	WaypointID *int64    `gorm:"index" json:"waypointId,omitempty"`
+	Waypoint   *Waypoint `gorm:"foreignKey:WaypointID" json:"waypoint,omitempty"`
 }
 
 type RouteRevisionSet struct {

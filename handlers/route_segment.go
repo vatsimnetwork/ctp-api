@@ -2,6 +2,7 @@ package handlers
 
 import (
 	"strconv"
+	"strings"
 
 	"github.com/gofiber/fiber/v3"
 	"github.com/vatsimnetwork/ctp-api/database"
@@ -18,6 +19,10 @@ type locationInput struct {
 	SortOrder  uint    `json:"sortOrder"`
 }
 
+type tagInput struct {
+	Tag string `json:"tag"`
+}
+
 type routeSegmentInput struct {
 	ID                          uint            `json:"id"`
 	Identifier                  string          `json:"identifier"`
@@ -28,12 +33,13 @@ type routeSegmentInput struct {
 	Color                       string          `json:"color"`
 	Enabled                     bool            `json:"enabled"`
 	Facilities                  string          `json:"facilities"`
-	RouteSegmentTags            []string        `json:"routeSegmentTags"`
+	Tags                        []tagInput      `json:"tags"`
 	ProvidedFacilityProgression []models.Sector `json:"providedFacilityProgression"`
 	Locations                   []locationInput `json:"locations"`
 	RouteRevision               uint            `json:"routeRevision"`
 	EventID                     *uint           `json:"eventId,omitempty"`
 }
+
 
 // ListAllRouteSegments godoc
 //
@@ -157,14 +163,56 @@ func BatchSaveRouteSegments(c fiber.Ctx) error {
 			}
 		}
 
+		// Upsert global sectors from all facilities strings.
+		allIdents := map[string]struct{}{}
+		for _, seg := range payload.Updates {
+			if seg.Facilities == "" {
+				continue
+			}
+			for _, ident := range strings.Fields(seg.Facilities) {
+				allIdents[ident] = struct{}{}
+			}
+		}
+		for ident := range allIdents {
+			var count int64
+			tx.Model(&models.Sector{}).Where("identifier = ? AND event_id IS NULL", ident).Count(&count)
+			if count == 0 {
+				s := models.Sector{}
+				s.Identifier = ident
+				s.MaximumAircraftPerHour = 20
+				tx.Create(&s)
+			}
+		}
+
+		var globalSectors []models.Sector
+		tx.Where("event_id IS NULL").Find(&globalSectors)
+		sectorByIdent := make(map[string]models.Sector, len(globalSectors))
+		for _, s := range globalSectors {
+			sectorByIdent[s.Identifier] = s
+		}
+
 		for _, input := range payload.Updates {
+			// Resolve facilities string ("EISN,EGGX") to Sector records.
+			var resolvedSectors []models.Sector
+			if input.Facilities != "" {
+				for _, ident := range strings.Fields(input.Facilities) {
+					if s, found := sectorByIdent[ident]; found {
+						resolvedSectors = append(resolvedSectors, s)
+					}
+				}
+			}
+			// Fall back to any explicitly provided objects (admin edits via API).
+			if len(resolvedSectors) == 0 {
+				resolvedSectors = input.ProvidedFacilityProgression
+			}
+
 			seg := models.RouteSegment{
 				RouteString:                 input.RouteString,
 				RouteSegmentGroup:           input.RouteSegmentGroup,
 				Color:                       input.Color,
 				Enabled:                     input.Enabled,
 				Facilities:                  input.Facilities,
-				ProvidedFacilityProgression: input.ProvidedFacilityProgression,
+				ProvidedFacilityProgression: resolvedSectors,
 				RouteRevision:               input.RouteRevision,
 				EventID:                     input.EventID,
 			}
@@ -184,9 +232,9 @@ func BatchSaveRouteSegments(c fiber.Ctx) error {
 				}
 			}
 
-			tags := make([]models.RouteSegmentTag, 0, len(input.RouteSegmentTags))
-			for _, t := range input.RouteSegmentTags {
-				tags = append(tags, models.RouteSegmentTag{RouteSegmentID: seg.ID, Tag: t})
+			tags := make([]models.RouteSegmentTag, 0, len(input.Tags))
+			for _, t := range input.Tags {
+				tags = append(tags, models.RouteSegmentTag{RouteSegmentID: seg.ID, Tag: t.Tag})
 			}
 			if len(tags) > 0 {
 				if err := tx.Create(&tags).Error; err != nil {
