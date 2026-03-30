@@ -335,6 +335,28 @@ func BatchSaveRouteSegments(c fiber.Ctx) error {
 			}
 		}
 
+		// Clean up orphaned EventTags: delete any EventTag for each affected event
+		// that is no longer referenced by any RouteSegmentTag.
+		affectedEventIDs := map[uint]struct{}{}
+		for _, input := range payload.Updates {
+			if input.EventID != nil {
+				affectedEventIDs[*input.EventID] = struct{}{}
+			}
+		}
+		for eid := range affectedEventIDs {
+			if err := tx.Exec(`
+				DELETE FROM event_tags
+				WHERE event_id = ?
+				AND id NOT IN (
+					SELECT DISTINCT rst.tag_id
+					FROM route_segment_tags rst
+					INNER JOIN route_segments rs ON rs.id = rst.route_segment_id
+					WHERE rs.event_id = ? AND rst.tag_id IS NOT NULL
+				)`, eid, eid).Error; err != nil {
+				return err
+			}
+		}
+
 		return nil
 	})
 

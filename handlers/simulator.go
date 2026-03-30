@@ -312,13 +312,23 @@ func buildSimEvent(event models.VATSIMEvent, revision *models.SlotRevision, incl
 		routeSegments = append(routeSegments, mapRouteSegment(r, airportWaypointIDs))
 	}
 
+	departureHours := time.Duration(event.DepartureTimeWindow).Hours()
+
 	sectorByID := make(map[uint]simSector)
 	for _, r := range event.RouteSegments {
 		for _, s := range r.ProvidedFacilityProgression {
 			if _, exists := sectorByID[s.ID]; !exists {
+				// Compute MaximumSlots from MaximumAircraftPerHour * departure window.
+				// 65535 means unlimited (sentinel); otherwise cap at 65534 to avoid overflow.
 				var maxSlots uint16
-				if s.MaximumSlots != nil {
-					maxSlots = *s.MaximumSlots
+				if s.MaximumAircraftPerHour >= 65535 {
+					maxSlots = 65535
+				} else {
+					computed := uint32(float64(s.MaximumAircraftPerHour) * departureHours)
+					if computed > 65534 {
+						computed = 65534
+					}
+					maxSlots = uint16(computed)
 				}
 				sectorByID[s.ID] = simSector{
 					Id:                     s.ID,
@@ -348,7 +358,8 @@ func buildSimEvent(event models.VATSIMEvent, revision *models.SlotRevision, incl
 			if t.TagID == nil {
 				continue
 			}
-			if t.TagRef.MaximumAircraftPerHour != nil && *t.TagRef.MaximumAircraftPerHour > 0 {
+			// Include all tags with a configured limit (not nil, not the unlimited sentinel 65535).
+			if t.TagRef.MaximumAircraftPerHour != nil && *t.TagRef.MaximumAircraftPerHour < 65535 {
 				if _, exists := tagLimitByID[*t.TagID]; !exists {
 					tagLimitByID[*t.TagID] = tagEntry{
 						id:         *t.TagID,
@@ -360,12 +371,21 @@ func buildSimEvent(event models.VATSIMEvent, revision *models.SlotRevision, incl
 		}
 	}
 	tagLimits := make([]simTagLimit, 0, len(tagLimitByID))
-	departureHours := time.Duration(event.DepartureTimeWindow).Hours()
 	for _, te := range tagLimitByID {
+		var maxSlots uint16
+		if te.maxPerHour >= 65535 {
+			maxSlots = 65535
+		} else {
+			computed := uint32(float64(te.maxPerHour) * departureHours)
+			if computed > 65534 {
+				computed = 65534
+			}
+			maxSlots = uint16(computed)
+		}
 		tagLimits = append(tagLimits, simTagLimit{
 			Id:           te.id,
 			Tag:          te.name,
-			MaximumSlots: uint16(float64(te.maxPerHour) * departureHours),
+			MaximumSlots: maxSlots,
 		})
 	}
 	sort.Slice(tagLimits, func(i, j int) bool { return tagLimits[i].Id < tagLimits[j].Id })
