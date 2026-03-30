@@ -27,6 +27,9 @@ const simulatorTimeout = 2 * time.Minute
 // Updated at key points during simulation so the frontend can poll.
 var simStatusStore sync.Map
 
+// simLatestResponseStore maps eventID (uint64) → raw JSON bytes of the last simulator response.
+var simLatestResponseStore sync.Map
+
 // GetSimulateStatus returns the current simulation status for an event.
 func GetSimulateStatus(c fiber.Ctx) error {
 	id, err := strconv.ParseUint(c.Params("id"), 10, 64)
@@ -37,6 +40,21 @@ func GetSimulateStatus(c fiber.Ctx) error {
 		return c.JSON(fiber.Map{"status": status})
 	}
 	return c.JSON(fiber.Map{"status": "idle"})
+}
+
+// GetLatestSimulatorResponse returns the raw JSON body of the most recent simulator
+// response for an event, exactly as received (1:1, no re-encoding).
+func GetLatestSimulatorResponse(c fiber.Ctx) error {
+	id, err := strconv.ParseUint(c.Params("id"), 10, 64)
+	if err != nil {
+		return fiber.NewError(fiber.StatusBadRequest, "invalid event id")
+	}
+	raw, ok := simLatestResponseStore.Load(id)
+	if !ok {
+		return fiber.NewError(fiber.StatusNotFound, "no simulator response available for this event")
+	}
+	c.Set(fiber.HeaderContentType, fiber.MIMEApplicationJSON)
+	return c.Send(raw.([]byte))
 }
 
 type simCalculationParameters struct {
@@ -876,6 +894,9 @@ func invokeSimulator(c fiber.Ctx, path string, includeSlots bool, save func(uint
 		Int("slotsInResponse", len(simResp.Slots)).
 		Int("airportsInResponse", len(simResp.Airports)).
 		Msg("[invokeSimulator] parsed simulator response, calling save")
+
+	// Persist raw response so it can be retrieved via the latest-response endpoint.
+	simLatestResponseStore.Store(id, respBody)
 
 	simStatusStore.Store(id, "sim_responded")
 
