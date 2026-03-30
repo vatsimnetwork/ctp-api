@@ -560,44 +560,81 @@ func saveCalculationResult(eventID uint, resp simResponseEvent, commentary strin
 }
 
 func saveSimulationResult(eventID uint, resp simResponseEvent, commentary string, slotGroupsJSON json.RawMessage, capsJSON json.RawMessage) (uint, uint, error) {
+	log.Info().
+		Uint("eventId", eventID).
+		Int("slotsInResponse", len(resp.Slots)).
+		Int("slotGroupsBodyLen", len(slotGroupsJSON)).
+		Msg("[saveSimulation] starting")
+
 	var revisionID uint
 	var draftRevisionNumber uint
 	err := database.DB.Transaction(func(tx *gorm.DB) error {
 		var revision models.SlotRevision
 		if err := tx.Where("event_id = ?", eventID).Order("number DESC").First(&revision).Error; err != nil {
+			log.Error().Err(err).Uint("eventId", eventID).Msg("[saveSimulation] could not find slot revision")
 			return fiber.NewError(fiber.StatusNotFound, "no slot revision found to attach simulation results to")
 		}
 		revisionID = revision.ID
+		log.Info().
+			Uint("revisionId", revision.ID).
+			Uint("revisionNumber", revision.Number).
+			Msg("[saveSimulation] found revision, updating commentary")
 
 		if err := tx.Model(&revision).Update("simulation_output_commentary", commentary).Error; err != nil {
+			log.Error().Err(err).Msg("[saveSimulation] failed to update commentary")
 			return err
 		}
 
 		airportByWaypoint := airportWaypointLookup(tx, eventID)
 
 		// Update departure/arrival times on each slot using the IDs the simulator echoes back.
+		zeroSlots := 0
+		updatedSlots := 0
+		missedSlots := 0
 		for _, s := range resp.Slots {
 			if s.Id == 0 {
+				zeroSlots++
 				continue
 			}
 			updates := map[string]interface{}{
 				"departure_time":         s.DepartureTime.Time,
 				"projected_arrival_time": s.ProjectedArrivalTime.Time,
 			}
-			if res := tx.Model(&models.Slot{}).
+			res := tx.Model(&models.Slot{}).
 				Where("id = ? AND slot_revision_id = ?", s.Id, revision.ID).
-				Updates(updates); res.Error != nil {
-				log.Warn().Err(res.Error).Uint("slotId", s.Id).Msg("failed to update slot times")
+				Updates(updates)
+			if res.Error != nil {
+				log.Warn().Err(res.Error).Uint("slotId", s.Id).Msg("[saveSimulation] failed to update slot times")
+			} else if res.RowsAffected == 0 {
+				missedSlots++
+				if missedSlots <= 3 {
+					log.Warn().
+						Uint("slotId", s.Id).
+						Uint("revisionId", revision.ID).
+						Str("depTime", s.DepartureTime.Time.String()).
+						Msg("[saveSimulation] slot update matched 0 rows")
+				}
+			} else {
+				updatedSlots++
 			}
 		}
+		log.Info().
+			Int("updated", updatedSlots).
+			Int("missed", missedSlots).
+			Int("zeroId", zeroSlots).
+			Int("total", len(resp.Slots)).
+			Uint("revisionId", revision.ID).
+			Msg("[saveSimulation] slot time update complete")
 
 		tx.Where("slot_revision_id = ?", revision.ID).Delete(&models.ThroughputState{})
 		tx.Where("slot_revision_id = ?", revision.ID).Delete(&models.ThroughputSnapshot{})
 
 		if err := writeThroughputStates(tx, revision.ID, resp, airportByWaypoint); err != nil {
+			log.Error().Err(err).Msg("[saveSimulation] writeThroughputStates failed")
 			return err
 		}
 		if err := writeThroughputSnapshots(tx, revision.ID, resp, airportByWaypoint); err != nil {
+			log.Error().Err(err).Msg("[saveSimulation] writeThroughputSnapshots failed")
 			return err
 		}
 
@@ -618,13 +655,25 @@ func saveSimulationResult(eventID uint, resp simResponseEvent, commentary string
 				SlotGenerationOutputCommentary: string(draftCommentary),
 			}
 			if err := tx.Create(&draft).Error; err != nil {
+				log.Error().Err(err).Msg("[saveSimulation] failed to create draft revision")
 				return err
 			}
 			draftRevisionNumber = draft.Number
+			log.Info().Uint("draftNumber", draftRevisionNumber).Msg("[saveSimulation] draft revision created")
+		} else {
+			log.Warn().Msg("[saveSimulation] no slotGroups in request body — skipping draft creation")
 		}
 
 		return nil
 	})
+	if err != nil {
+		log.Error().Err(err).Uint("eventId", eventID).Msg("[saveSimulation] transaction failed")
+	} else {
+		log.Info().
+			Uint("revisionId", revisionID).
+			Uint("draftRevisionNumber", draftRevisionNumber).
+			Msg("[saveSimulation] transaction committed")
+	}
 	return revisionID, draftRevisionNumber, err
 }
 
@@ -643,6 +692,16 @@ func invokeSimulator(c fiber.Ctx, path string, includeSlots bool, save func(uint
 		return err
 	}
 
+	slotCount := 0
+	if revision != nil {
+		slotCount = len(revision.Slots)
+	}
+	log.Info().
+		Uint64("eventId", id).
+		Int("slots", slotCount).
+		Str("path", path).
+		Msg("[invokeSimulator] fetched data, calling simulator")
+
 	payload := buildSimEvent(*event, revision, includeSlots)
 
 	body, err := json.Marshal(payload)
@@ -655,8 +714,14 @@ func invokeSimulator(c fiber.Ctx, path string, includeSlots bool, save func(uint
 
 	respBody, statusCode, err := callSimulator(ctx, path, body)
 	if err != nil {
+		log.Error().Err(err).Str("path", path).Msg("[invokeSimulator] simulator call failed")
 		return fiber.NewError(fiber.StatusBadGateway, "simulator request failed: "+err.Error())
 	}
+	log.Info().
+		Str("path", path).
+		Int("status", statusCode).
+		Int("responseBytes", len(respBody)).
+		Msg("[invokeSimulator] simulator responded")
 	if statusCode == http.StatusInternalServerError {
 		return fiber.NewError(fiber.StatusBadGateway, "simulator calculation error: "+string(respBody))
 	}
@@ -681,6 +746,12 @@ func invokeSimulator(c fiber.Ctx, path string, includeSlots bool, save func(uint
 			Msgf("failed to parse simulator response: %s", err)
 		return fiber.NewError(fiber.StatusInternalServerError, "failed to parse simulator response: "+err.Error())
 	}
+
+	log.Info().
+		Str("path", path).
+		Int("slotsInResponse", len(simResp.Slots)).
+		Int("airportsInResponse", len(simResp.Airports)).
+		Msg("[invokeSimulator] parsed simulator response, calling save")
 
 	commentary := simResp.CalculationParameters.SlotGenerationOutputCommentary
 	if path == "/simulateEvent" {
