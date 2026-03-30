@@ -51,7 +51,9 @@ func CreateRouteRevision(c fiber.Ctx) error {
 		}
 
 		var segments []models.RouteSegment
-		segQuery := tx.Preload("Tags")
+		segQuery := tx.Preload("Tags", func(db *gorm.DB) *gorm.DB {
+			return db.Order("tag ASC")
+		})
 		if eventIDStr := c.Query("eventId"); eventIDStr != "" {
 			if eid, err := strconv.ParseUint(eventIDStr, 10, 64); err == nil {
 				segQuery = segQuery.Where("event_id = ?", eid)

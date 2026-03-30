@@ -55,7 +55,9 @@ func ListAllRouteSegments(c fiber.Ctx) error {
 	group := c.Query("routeSegmentGroup")
 
 	var segments []models.RouteSegment
-	query := database.DB.Preload("Tags").Preload("Locations.Waypoint")
+	query := database.DB.Preload("Tags", func(db *gorm.DB) *gorm.DB {
+		return db.Order("tag ASC")
+	}).Preload("Locations.Waypoint")
 	
 	if group != "" {
 		query = query.Where("route_segment_group = ?", group)
@@ -88,7 +90,9 @@ func ListEventRouteSegments(c fiber.Ctx) error {
 
 	var segments []models.RouteSegment
 	query := database.DB.
-		Preload("Tags").
+		Preload("Tags", func(db *gorm.DB) *gorm.DB {
+			return db.Order("tag ASC")
+		}).
 		Preload("Locations.Waypoint").
 		Preload("ProvidedFacilityProgression").
 		Where("event_id = ?", eventID)
