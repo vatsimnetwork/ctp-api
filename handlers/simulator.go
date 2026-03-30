@@ -13,6 +13,7 @@ import (
 	"time"
 
 	"github.com/gofiber/fiber/v3"
+	"github.com/rs/zerolog/log"
 	"github.com/vatsimnetwork/ctp-api/config"
 	"github.com/vatsimnetwork/ctp-api/database"
 	"github.com/vatsimnetwork/ctp-api/models"
@@ -602,8 +603,21 @@ func invokeSimulator(c fiber.Ctx, path string, includeSlots bool, save func(uint
 		return fiber.NewError(fiber.StatusBadGateway, fmt.Sprintf("simulator returned %d", statusCode))
 	}
 
+	// Strip a UTF-8 BOM (\xEF\xBB\xBF) if the simulator includes one.
+	respBody = bytes.TrimPrefix(respBody, []byte("\xef\xbb\xbf"))
+
 	var simResp simResponseEvent
 	if err := json.Unmarshal(respBody, &simResp); err != nil {
+		// Log the first 512 bytes of the raw body to help diagnose encoding issues.
+		preview := respBody
+		if len(preview) > 512 {
+			preview = preview[:512]
+		}
+		log.Error().
+			Str("path", path).
+			Int("statusCode", statusCode).
+			Str("bodyPreview", string(preview)).
+			Msgf("failed to parse simulator response: %s", err)
 		return fiber.NewError(fiber.StatusInternalServerError, "failed to parse simulator response: "+err.Error())
 	}
 
