@@ -35,6 +35,7 @@ func Connect() {
 		&models.Airport{},
 		&models.Location{},
 		&models.RouteSegment{},
+		&models.EventTag{},
 		&models.RouteSegmentTag{},
 		&models.Sector{},
 		&models.SectorBoundary{},

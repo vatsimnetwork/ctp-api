@@ -9,8 +9,8 @@ import (
 )
 
 type tagLimitResponse struct {
-	Tag                    string  `json:"tag"`
-	MaximumAircraftPerHour uint16  `json:"maximumAircraftPerHour"`
+	Tag                    string `json:"tag"`
+	MaximumAircraftPerHour uint16 `json:"maximumAircraftPerHour"`
 }
 
 func ListEventTagLimits(c fiber.Ctx) error {
@@ -19,38 +19,19 @@ func ListEventTagLimits(c fiber.Ctx) error {
 		return fiber.NewError(fiber.StatusBadRequest, "invalid event id")
 	}
 
-	var tags []models.RouteSegmentTag
-	if err := database.DB.
-		Joins("JOIN route_segments ON route_segments.id = route_segment_tags.route_segment_id").
-		Where("route_segments.event_id = ?", eventID).
-		Find(&tags).Error; err != nil {
+	var tags []models.EventTag
+	if err := database.DB.Where("event_id = ?", eventID).Order("name ASC").Find(&tags).Error; err != nil {
 		return fiber.NewError(fiber.StatusInternalServerError, err.Error())
 	}
 
-	seen := make(map[string]bool)
-	limitByTag := make(map[string]*uint16)
-	order := []string{}
-
+	result := make([]tagLimitResponse, 0, len(tags))
 	for _, t := range tags {
-		if !seen[t.Tag] {
-			seen[t.Tag] = true
-			order = append(order, t.Tag)
-		}
-		if t.MaximumAircraftPerHour != nil && limitByTag[t.Tag] == nil {
-			v := *t.MaximumAircraftPerHour
-			limitByTag[t.Tag] = &v
-		}
-	}
-
-	result := make([]tagLimitResponse, 0, len(order))
-	for _, tag := range order {
 		var limit uint16
-		if limitByTag[tag] != nil {
-			limit = *limitByTag[tag]
+		if t.MaximumAircraftPerHour != nil {
+			limit = *t.MaximumAircraftPerHour
 		}
-		result = append(result, tagLimitResponse{Tag: tag, MaximumAircraftPerHour: limit})
+		result = append(result, tagLimitResponse{Tag: t.Name, MaximumAircraftPerHour: limit})
 	}
-
 	return c.JSON(result)
 }
 
@@ -70,8 +51,8 @@ func UpsertEventTagLimits(c fiber.Ctx) error {
 
 	for _, item := range input {
 		v := item.MaximumAircraftPerHour
-		if err := database.DB.Model(&models.RouteSegmentTag{}).
-			Where("tag = ? AND route_segment_id IN (SELECT id FROM route_segments WHERE event_id = ?)", item.Tag, eventID).
+		if err := database.DB.Model(&models.EventTag{}).
+			Where("event_id = ? AND name = ?", eventID, item.Tag).
 			UpdateColumn("maximum_aircraft_per_hour", v).Error; err != nil {
 			return fiber.NewError(fiber.StatusInternalServerError, err.Error())
 		}

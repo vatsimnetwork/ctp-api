@@ -185,7 +185,9 @@ func mapAirport(a models.Airport) simAirport {
 func mapRouteSegment(r models.RouteSegment, airportWaypointIDs map[int64]bool) simRouteSegment {
 	tags := make([]string, 0, len(r.Tags))
 	for _, t := range r.Tags {
-		tags = append(tags, t.Tag)
+		if t.TagID != nil {
+			tags = append(tags, t.TagRef.Name)
+		}
 	}
 
 	sorted := make([]models.Location, len(r.Locations))
@@ -318,9 +320,12 @@ func buildSimEvent(event models.VATSIMEvent, revision *models.SlotRevision, incl
 	tagLimitByName := make(map[string]uint16)
 	for _, r := range event.RouteSegments {
 		for _, t := range r.Tags {
-			if t.MaximumAircraftPerHour != nil && *t.MaximumAircraftPerHour > 0 {
-				if _, exists := tagLimitByName[t.Tag]; !exists {
-					tagLimitByName[t.Tag] = *t.MaximumAircraftPerHour
+			if t.TagID == nil {
+				continue
+			}
+			if t.TagRef.MaximumAircraftPerHour != nil && *t.TagRef.MaximumAircraftPerHour > 0 {
+				if _, exists := tagLimitByName[t.TagRef.Name]; !exists {
+					tagLimitByName[t.TagRef.Name] = *t.TagRef.MaximumAircraftPerHour
 				}
 			}
 		}
@@ -381,7 +386,7 @@ func fetchSimulatorData(id uint64) (*models.VATSIMEvent, *models.SlotRevision, e
 	result := database.DB.
 		Preload("Airports.Waypoint").
 		Preload("RouteSegments").
-		Preload("RouteSegments.Tags").
+		Preload("RouteSegments.Tags.TagRef").
 		Preload("RouteSegments.Locations.Waypoint").
 		Preload("RouteSegments.ProvidedFacilityProgression").
 		First(&event, id)
@@ -395,7 +400,7 @@ func fetchSimulatorData(id uint64) (*models.VATSIMEvent, *models.SlotRevision, e
 		Preload("Slots.DepartureAirport.Waypoint").
 		Preload("Slots.ArrivalAirport.Waypoint").
 		Preload("Slots.RouteSegments").
-		Preload("Slots.RouteSegments.Tags").
+		Preload("Slots.RouteSegments.Tags.TagRef").
 		Preload("Slots.RouteSegments.Locations.Waypoint").
 		Preload("Slots.RouteSegments.ProvidedFacilityProgression").
 		Where("event_id = ?", id).
@@ -436,82 +441,115 @@ func airportWaypointLookup(tx *gorm.DB, eventID uint) map[int64]uint {
 }
 
 func writeThroughputStates(tx *gorm.DB, revisionID uint, resp simResponseEvent, airportByWaypoint map[int64]uint) error {
+	rows := make([]models.ThroughputState, 0, len(resp.Airports)+len(resp.Waypoints)+len(resp.RouteSegments))
+
 	for _, a := range resp.Airports {
 		var ts *time.Time
 		if !a.DepartureTimeWindowStart.IsZero() {
 			t := a.DepartureTimeWindowStart.Time
 			ts = &t
 		}
-		if err := tx.Create(&models.ThroughputState{
+		rows = append(rows, models.ThroughputState{
 			SlotRevisionID:           revisionID,
 			ThroughputPointType:      "airport",
 			ThroughputPointID:        int64(airportByWaypoint[a.Id]),
 			MaximumSlots:             a.MaximumSlots,
 			SlotsAllocated:           a.SlotsAllocated,
 			DepartureTimeWindowStart: ts,
-		}).Error; err != nil {
-			return err
-		}
+		})
 	}
 	for _, w := range resp.Waypoints {
-		if err := tx.Create(&models.ThroughputState{
+		rows = append(rows, models.ThroughputState{
 			SlotRevisionID:      revisionID,
 			ThroughputPointType: "waypoint",
 			ThroughputPointID:   w.Id,
 			MaximumSlots:        w.MaximumSlots,
 			SlotsAllocated:      w.SlotsAllocated,
-		}).Error; err != nil {
-			return err
-		}
+		})
 	}
 	for _, r := range resp.RouteSegments {
-		if err := tx.Create(&models.ThroughputState{
+		rows = append(rows, models.ThroughputState{
 			SlotRevisionID:      revisionID,
 			ThroughputPointType: "route_segment",
 			ThroughputPointID:   r.Id,
 			MaximumSlots:        r.MaximumSlots,
 			SlotsAllocated:      r.SlotsAllocated,
-		}).Error; err != nil {
-			return err
-		}
+		})
 	}
-	return nil
+
+	if len(rows) == 0 {
+		return nil
+	}
+	return tx.CreateInBatches(rows, 500).Error
 }
 
 func writeThroughputSnapshots(tx *gorm.DB, revisionID uint, resp simResponseEvent, airportByWaypoint map[int64]uint) error {
-	write := func(pointType string, pointID int64, frames map[int][]uint) error {
-		for minuteOffset, slotIDs := range frames {
-			for _, slotID := range slotIDs {
-				if err := tx.Create(&models.ThroughputSnapshot{
-					SlotRevisionID:      revisionID,
-					ThroughputPointType: pointType,
-					ThroughputPointID:   pointID,
-					MinuteOffset:        minuteOffset,
-					SlotID:              slotID,
-				}).Error; err != nil {
-					return err
-				}
-			}
-		}
-		return nil
-	}
-
+	// Pre-calculate total capacity to avoid reallocations
+	total := 0
 	for _, a := range resp.Airports {
-		if err := write("airport", int64(airportByWaypoint[a.Id]), a.SlotsFrames); err != nil {
-			return err
+		for _, ids := range a.SlotsFrames {
+			total += len(ids)
 		}
 	}
 	for _, w := range resp.Waypoints {
-		if err := write("waypoint", w.Id, w.SlotsFrames); err != nil {
-			return err
+		for _, ids := range w.SlotsFrames {
+			total += len(ids)
 		}
 	}
 	for _, r := range resp.RouteSegments {
-		if err := write("route_segment", r.Id, r.SlotsFrames); err != nil {
-			return err
+		for _, ids := range r.SlotsFrames {
+			total += len(ids)
 		}
 	}
-	return nil
+
+	rows := make([]models.ThroughputSnapshot, 0, total)
+
+	for _, a := range resp.Airports {
+		pid := int64(airportByWaypoint[a.Id])
+		for minuteOffset, slotIDs := range a.SlotsFrames {
+			for _, slotID := range slotIDs {
+				rows = append(rows, models.ThroughputSnapshot{
+					SlotRevisionID:      revisionID,
+					ThroughputPointType: "airport",
+					ThroughputPointID:   pid,
+					MinuteOffset:        minuteOffset,
+					SlotID:              slotID,
+				})
+			}
+		}
+	}
+	for _, w := range resp.Waypoints {
+		for minuteOffset, slotIDs := range w.SlotsFrames {
+			for _, slotID := range slotIDs {
+				rows = append(rows, models.ThroughputSnapshot{
+					SlotRevisionID:      revisionID,
+					ThroughputPointType: "waypoint",
+					ThroughputPointID:   w.Id,
+					MinuteOffset:        minuteOffset,
+					SlotID:              slotID,
+				})
+			}
+		}
+	}
+	for _, r := range resp.RouteSegments {
+		for minuteOffset, slotIDs := range r.SlotsFrames {
+			for _, slotID := range slotIDs {
+				rows = append(rows, models.ThroughputSnapshot{
+					SlotRevisionID:      revisionID,
+					ThroughputPointType: "route_segment",
+					ThroughputPointID:   r.Id,
+					MinuteOffset:        minuteOffset,
+					SlotID:              slotID,
+				})
+			}
+		}
+	}
+
+	if len(rows) == 0 {
+		return nil
+	}
+	log.Info().Int("snapshotRows", len(rows)).Msg("[writeThroughputSnapshots] batch inserting")
+	return tx.CreateInBatches(rows, 1000).Error
 }
 
 func saveCalculationResult(eventID uint, resp simResponseEvent, commentary string) (uint, uint, error) {
@@ -587,36 +625,49 @@ func saveSimulationResult(eventID uint, resp simResponseEvent, commentary string
 
 		airportByWaypoint := airportWaypointLookup(tx, eventID)
 
-		// Update departure/arrival times on each slot using the IDs the simulator echoes back.
-		zeroSlots := 0
-		updatedSlots := 0
-		missedSlots := 0
+		// Batch-update departure/arrival times using a CASE expression — one query
+		// instead of one per slot.
+		type slotTime struct {
+			id  uint
+			dep time.Time
+			arr time.Time
+		}
+		toUpdate := make([]slotTime, 0, len(resp.Slots))
 		for _, s := range resp.Slots {
-			if s.Id == 0 {
-				zeroSlots++
+			if s.Id == 0 || s.DepartureTime.IsZero() {
 				continue
 			}
-			updates := map[string]interface{}{
-				"departure_time":         s.DepartureTime.Time,
-				"projected_arrival_time": s.ProjectedArrivalTime.Time,
+			toUpdate = append(toUpdate, slotTime{s.Id, s.DepartureTime.Time, s.ProjectedArrivalTime.Time})
+		}
+		zeroSlots := len(resp.Slots) - len(toUpdate)
+
+		updatedSlots := 0
+		missedSlots := 0
+		if len(toUpdate) > 0 {
+			// Build CASE … WHEN … THEN … END for both time columns in one statement.
+			ids := make([]uint, len(toUpdate))
+			depCase := "CASE id"
+			arrCase := "CASE id"
+			for i, st := range toUpdate {
+				ids[i] = st.id
+				depCase += fmt.Sprintf(" WHEN %d THEN '%s'", st.id, st.dep.UTC().Format("2006-01-02T15:04:05Z"))
+				arrCase += fmt.Sprintf(" WHEN %d THEN '%s'", st.id, st.arr.UTC().Format("2006-01-02T15:04:05Z"))
 			}
+			depCase += " END"
+			arrCase += " END"
+
 			res := tx.Model(&models.Slot{}).
-				Where("id = ? AND slot_revision_id = ?", s.Id, revision.ID).
-				Updates(updates)
+				Where("id IN ? AND slot_revision_id = ?", ids, revision.ID).
+				Updates(map[string]interface{}{
+					"departure_time":         gorm.Expr(depCase),
+					"projected_arrival_time": gorm.Expr(arrCase),
+				})
 			if res.Error != nil {
-				log.Warn().Err(res.Error).Uint("slotId", s.Id).Msg("[saveSimulation] failed to update slot times")
-			} else if res.RowsAffected == 0 {
-				missedSlots++
-				if missedSlots <= 3 {
-					log.Warn().
-						Uint("slotId", s.Id).
-						Uint("revisionId", revision.ID).
-						Str("depTime", s.DepartureTime.Time.String()).
-						Msg("[saveSimulation] slot update matched 0 rows")
-				}
-			} else {
-				updatedSlots++
+				log.Error().Err(res.Error).Msg("[saveSimulation] bulk slot time update failed")
+				return res.Error
 			}
+			updatedSlots = int(res.RowsAffected)
+			missedSlots = len(toUpdate) - updatedSlots
 		}
 		log.Info().
 			Int("updated", updatedSlots).
@@ -638,43 +689,43 @@ func saveSimulationResult(eventID uint, resp simResponseEvent, commentary string
 			return err
 		}
 
-		// Create a new draft revision carrying the slot groups and caps for continued editing.
-		if len(slotGroupsJSON) > 0 {
-			draftCommentary, _ := json.Marshal(map[string]interface{}{
-				"slotGroups": json.RawMessage(slotGroupsJSON),
-				"caps":       json.RawMessage(capsJSON),
-				"draft":      true,
-			})
-
-			var maxNumber uint
-			tx.Model(&models.SlotRevision{}).Where("event_id = ?", eventID).Select("COALESCE(MAX(number), 0)").Scan(&maxNumber)
-
-			draft := models.SlotRevision{
-				EventID:                        eventID,
-				Number:                         maxNumber + 1,
-				SlotGenerationOutputCommentary: string(draftCommentary),
-			}
-			if err := tx.Create(&draft).Error; err != nil {
-				log.Error().Err(err).Msg("[saveSimulation] failed to create draft revision")
-				return err
-			}
-			draftRevisionNumber = draft.Number
-			log.Info().Uint("draftNumber", draftRevisionNumber).Msg("[saveSimulation] draft revision created")
-		} else {
-			log.Warn().Msg("[saveSimulation] no slotGroups in request body — skipping draft creation")
-		}
-
 		return nil
 	})
 	if err != nil {
 		log.Error().Err(err).Uint("eventId", eventID).Msg("[saveSimulation] transaction failed")
-	} else {
-		log.Info().
-			Uint("revisionId", revisionID).
-			Uint("draftRevisionNumber", draftRevisionNumber).
-			Msg("[saveSimulation] transaction committed")
+		return revisionID, 0, err
 	}
-	return revisionID, draftRevisionNumber, err
+	log.Info().Uint("revisionId", revisionID).Msg("[saveSimulation] core transaction committed")
+
+	// Create the draft revision outside the main transaction — it does not need
+	// to be atomic with the slot-time / throughput updates and keeping it inside
+	// was holding the transaction open for seconds.
+	if len(slotGroupsJSON) > 0 {
+		draftCommentary, _ := json.Marshal(map[string]interface{}{
+			"slotGroups": json.RawMessage(slotGroupsJSON),
+			"caps":       json.RawMessage(capsJSON),
+			"draft":      true,
+		})
+
+		var maxNumber uint
+		database.DB.Model(&models.SlotRevision{}).Where("event_id = ?", eventID).Select("COALESCE(MAX(number), 0)").Scan(&maxNumber)
+
+		draft := models.SlotRevision{
+			EventID:                        eventID,
+			Number:                         maxNumber + 1,
+			SlotGenerationOutputCommentary: string(draftCommentary),
+		}
+		if createErr := database.DB.Create(&draft).Error; createErr != nil {
+			log.Error().Err(createErr).Msg("[saveSimulation] failed to create draft revision")
+		} else {
+			draftRevisionNumber = draft.Number
+			log.Info().Uint("draftNumber", draftRevisionNumber).Msg("[saveSimulation] draft revision created")
+		}
+	} else {
+		log.Warn().Msg("[saveSimulation] no slotGroups in request body — skipping draft creation")
+	}
+
+	return revisionID, draftRevisionNumber, nil
 }
 
 func invokeSimulator(c fiber.Ctx, path string, includeSlots bool, save func(uint, simResponseEvent, string) (uint, uint, error)) error {

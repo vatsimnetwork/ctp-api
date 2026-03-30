@@ -1,5 +1,7 @@
 package models
 
+import "encoding/json"
+
 type RouteSegment struct {
 	ThroughputPoint
 	RouteString                 string             `json:"routeString"`
@@ -16,8 +18,22 @@ type RouteSegment struct {
 }
 
 type RouteSegmentTag struct {
-	ID                     uint    `gorm:"primaryKey" json:"id"`
-	RouteSegmentID         uint    `gorm:"index;not null" json:"routeSegmentId"`
-	Tag                    string  `gorm:"not null" json:"tag"`
-	MaximumAircraftPerHour *uint16 `json:"maximumAircraftPerHour,omitempty"`
+	ID             uint     `gorm:"primaryKey" json:"id"`
+	RouteSegmentID uint     `gorm:"index;not null" json:"routeSegmentId"`
+	TagID          *uint    `gorm:"index" json:"-"`
+	TagRef         EventTag `gorm:"foreignKey:TagID" json:"-"`
+}
+
+func (r RouteSegmentTag) MarshalJSON() ([]byte, error) {
+	return json.Marshal(struct {
+		ID                     uint    `json:"id"`
+		RouteSegmentID         uint    `json:"routeSegmentId"`
+		Tag                    string  `json:"tag"`
+		MaximumAircraftPerHour *uint16 `json:"maximumAircraftPerHour,omitempty"`
+	}{
+		ID:                     r.ID,
+		RouteSegmentID:         r.RouteSegmentID,
+		Tag:                    r.TagRef.Name,
+		MaximumAircraftPerHour: r.TagRef.MaximumAircraftPerHour,
+	})
 }

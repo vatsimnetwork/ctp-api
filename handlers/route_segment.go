@@ -55,9 +55,7 @@ func ListAllRouteSegments(c fiber.Ctx) error {
 	group := c.Query("routeSegmentGroup")
 
 	var segments []models.RouteSegment
-	query := database.DB.Preload("Tags", func(db *gorm.DB) *gorm.DB {
-		return db.Order("tag ASC")
-	}).Preload("Locations.Waypoint")
+	query := database.DB.Preload("Tags.TagRef").Preload("Locations.Waypoint")
 	
 	if group != "" {
 		query = query.Where("route_segment_group = ?", group)
@@ -90,9 +88,7 @@ func ListEventRouteSegments(c fiber.Ctx) error {
 
 	var segments []models.RouteSegment
 	query := database.DB.
-		Preload("Tags", func(db *gorm.DB) *gorm.DB {
-			return db.Order("tag ASC")
-		}).
+		Preload("Tags.TagRef").
 		Preload("Locations.Waypoint").
 		Preload("ProvidedFacilityProgression").
 		Where("event_id = ?", eventID)
@@ -293,7 +289,22 @@ func BatchSaveRouteSegments(c fiber.Ctx) error {
 
 			tags := make([]models.RouteSegmentTag, 0, len(input.Tags))
 			for _, t := range input.Tags {
-				tags = append(tags, models.RouteSegmentTag{RouteSegmentID: seg.ID, Tag: t.Tag})
+				tagName := strings.TrimSpace(t.Tag)
+				if tagName == "" {
+					continue
+				}
+				// Upsert the EventTag (deduped by event+name) and get its ID.
+				var eventTag models.EventTag
+				if input.EventID != nil {
+					tx.Where(models.EventTag{EventID: *input.EventID, Name: tagName}).
+						FirstOrCreate(&eventTag)
+				}
+				rst := models.RouteSegmentTag{RouteSegmentID: seg.ID}
+				if eventTag.ID != 0 {
+					id := eventTag.ID
+					rst.TagID = &id
+				}
+				tags = append(tags, rst)
 			}
 			if len(tags) > 0 {
 				if err := tx.Create(&tags).Error; err != nil {
@@ -359,7 +370,7 @@ func UpdateRouteSegment(c fiber.Ctx) error {
 		return fiber.NewError(fiber.StatusInternalServerError, err.Error())
 	}
 
-	database.DB.Preload("Tags").Preload("Locations.Waypoint").Preload("ProvidedFacilityProgression").First(&existing, id)
+	database.DB.Preload("Tags.TagRef").Preload("Locations.Waypoint").Preload("ProvidedFacilityProgression").First(&existing, id)
 	return c.JSON(existing)
 }
 
@@ -436,6 +447,6 @@ return fiber.NewError(fiber.StatusInternalServerError, err.Error())
 }
 }
 
-database.DB.Preload("Tags").Preload("Locations.Waypoint").First(&existing, id)
+database.DB.Preload("Tags.TagRef").Preload("Locations.Waypoint").First(&existing, id)
 return c.JSON(existing)
 }
