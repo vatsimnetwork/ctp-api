@@ -80,6 +80,7 @@ func main() {
 	api.Get("/events/:id/simulate-slots/preview", handlers.PreviewSimulatePayload)
 	api.Post("/events/:id/calculate-slots", handlers.CalculateSlots)
 	api.Post("/events/:id/simulate-slots", handlers.SimulateSlots)
+	api.Get("/events/:id/simulate-status", handlers.GetSimulateStatus)
 
 	api.Get("/events/:eventId/airports", handlers.ListAirports)
 	api.Post("/events/:eventId/airports", handlers.CreateAirport)

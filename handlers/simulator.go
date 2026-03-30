@@ -10,6 +10,7 @@ import (
 	"sort"
 	"strconv"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/gofiber/fiber/v3"
@@ -21,6 +22,22 @@ import (
 )
 
 const simulatorTimeout = 2 * time.Minute
+
+// simStatusStore maps eventID (uint64) → current status string.
+// Updated at key points during simulation so the frontend can poll.
+var simStatusStore sync.Map
+
+// GetSimulateStatus returns the current simulation status for an event.
+func GetSimulateStatus(c fiber.Ctx) error {
+	id, err := strconv.ParseUint(c.Params("id"), 10, 64)
+	if err != nil {
+		return fiber.NewError(fiber.StatusBadRequest, "invalid event id")
+	}
+	if status, ok := simStatusStore.Load(id); ok {
+		return c.JSON(fiber.Map{"status": status})
+	}
+	return c.JSON(fiber.Map{"status": "idle"})
+}
 
 type simCalculationParameters struct {
 	RecalculateMaximumAirportSlots                        bool    `json:"recalculateMaximumAirportSlots"`
@@ -64,18 +81,18 @@ type simSector struct {
 }
 
 type simRouteSegment struct {
-	Id                          uint     `json:"id"`
-	Identifier                  string   `json:"identifier"`
-	MaximumAircraftPerHour      uint16   `json:"maximumAircraftPerHour"`
-	MaximumSlots                uint16   `json:"maximumSlots"`
-	RouteString                 string   `json:"routeString"`
-	RouteSegmentGroup           string   `json:"routeSegmentGroup"`
-	Color                       string   `json:"color"`
-	Enabled                     bool     `json:"enabled"`
-	RouteSegmentTags            []string `json:"routeSegmentTags"`
-	ProvidedFacilityProgression []uint   `json:"providedFacilityProgression"`
-	Locations                   []int64  `json:"locations"`
-	RouteRevision               uint     `json:"routeRevision"`
+	Id                          uint   `json:"id"`
+	Identifier                  string `json:"identifier"`
+	MaximumAircraftPerHour      uint16 `json:"maximumAircraftPerHour"`
+	MaximumSlots                uint16 `json:"maximumSlots"`
+	RouteString                 string `json:"routeString"`
+	RouteSegmentGroup           string `json:"routeSegmentGroup"`
+	Color                       string `json:"color"`
+	Enabled                     bool   `json:"enabled"`
+	RouteSegmentTagIds          []uint `json:"routeSegmentTagIds"`
+	ProvidedFacilityProgression []uint `json:"providedFacilityProgression"`
+	Locations                   []int64 `json:"locations"`
+	RouteRevision               uint   `json:"routeRevision"`
 }
 
 type simSlot struct {
@@ -88,6 +105,7 @@ type simSlot struct {
 }
 
 type simTagLimit struct {
+	Id           uint   `json:"id"`
 	Tag          string `json:"tag"`
 	MaximumSlots uint16 `json:"maximumSlots"`
 }
@@ -183,10 +201,10 @@ func mapAirport(a models.Airport) simAirport {
 }
 
 func mapRouteSegment(r models.RouteSegment, airportWaypointIDs map[int64]bool) simRouteSegment {
-	tags := make([]string, 0, len(r.Tags))
+	tagIDs := make([]uint, 0, len(r.Tags))
 	for _, t := range r.Tags {
 		if t.TagID != nil {
-			tags = append(tags, t.TagRef.Name)
+			tagIDs = append(tagIDs, *t.TagID)
 		}
 	}
 
@@ -212,7 +230,7 @@ func mapRouteSegment(r models.RouteSegment, airportWaypointIDs map[int64]bool) s
 		RouteSegmentGroup:           r.RouteSegmentGroup,
 		Color:                       r.Color,
 		Enabled:                     r.Enabled,
-		RouteSegmentTags:            tags,
+		RouteSegmentTagIds:          tagIDs,
 		ProvidedFacilityProgression: pfp,
 		Locations:                   locs,
 		RouteRevision:               r.RouteRevision,
@@ -317,28 +335,40 @@ func buildSimEvent(event models.VATSIMEvent, revision *models.SlotRevision, incl
 	}
 	sort.Slice(sectors, func(i, j int) bool { return sectors[i].Id < sectors[j].Id })
 
-	tagLimitByName := make(map[string]uint16)
+	// Build tagLimits from all EventTag records that have a limit set.
+	// Key by ID so each EventTag appears exactly once regardless of how many route segments share it.
+	type tagEntry struct {
+		id           uint
+		name         string
+		maxPerHour   uint16
+	}
+	tagLimitByID := make(map[uint]tagEntry)
 	for _, r := range event.RouteSegments {
 		for _, t := range r.Tags {
 			if t.TagID == nil {
 				continue
 			}
 			if t.TagRef.MaximumAircraftPerHour != nil && *t.TagRef.MaximumAircraftPerHour > 0 {
-				if _, exists := tagLimitByName[t.TagRef.Name]; !exists {
-					tagLimitByName[t.TagRef.Name] = *t.TagRef.MaximumAircraftPerHour
+				if _, exists := tagLimitByID[*t.TagID]; !exists {
+					tagLimitByID[*t.TagID] = tagEntry{
+						id:         *t.TagID,
+						name:       t.TagRef.Name,
+						maxPerHour: *t.TagRef.MaximumAircraftPerHour,
+					}
 				}
 			}
 		}
 	}
-	tagLimits := make([]simTagLimit, 0, len(tagLimitByName))
+	tagLimits := make([]simTagLimit, 0, len(tagLimitByID))
 	departureHours := time.Duration(event.DepartureTimeWindow).Hours()
-	for tag, maxPerHour := range tagLimitByName {
+	for _, te := range tagLimitByID {
 		tagLimits = append(tagLimits, simTagLimit{
-			Tag:          tag,
-			MaximumSlots: uint16(float64(maxPerHour) * departureHours),
+			Id:           te.id,
+			Tag:          te.name,
+			MaximumSlots: uint16(float64(te.maxPerHour) * departureHours),
 		})
 	}
-	sort.Slice(tagLimits, func(i, j int) bool { return tagLimits[i].Tag < tagLimits[j].Tag })
+	sort.Slice(tagLimits, func(i, j int) bool { return tagLimits[i].Id < tagLimits[j].Id })
 
 	slots := []simSlot{}
 	var slotRevisionNumber uint
@@ -606,6 +636,10 @@ func saveSimulationResult(eventID uint, resp simResponseEvent, commentary string
 
 	var revisionID uint
 	var draftRevisionNumber uint
+
+	// ── Main transaction: only slot times + commentary ────────────────────────
+	// Throughput states/snapshots are written in a background goroutine below so
+	// they don't block the response.
 	err := database.DB.Transaction(func(tx *gorm.DB) error {
 		var revision models.SlotRevision
 		if err := tx.Where("event_id = ?", eventID).Order("number DESC").First(&revision).Error; err != nil {
@@ -623,10 +657,7 @@ func saveSimulationResult(eventID uint, resp simResponseEvent, commentary string
 			return err
 		}
 
-		airportByWaypoint := airportWaypointLookup(tx, eventID)
-
-		// Batch-update departure/arrival times using a CASE expression — one query
-		// instead of one per slot.
+		// Batch-update departure/arrival times — one query instead of one per slot.
 		type slotTime struct {
 			id  uint
 			dep time.Time
@@ -644,7 +675,6 @@ func saveSimulationResult(eventID uint, resp simResponseEvent, commentary string
 		updatedSlots := 0
 		missedSlots := 0
 		if len(toUpdate) > 0 {
-			// Build CASE … WHEN … THEN … END for both time columns in one statement.
 			ids := make([]uint, len(toUpdate))
 			depCase := "CASE id"
 			arrCase := "CASE id"
@@ -677,18 +707,6 @@ func saveSimulationResult(eventID uint, resp simResponseEvent, commentary string
 			Uint("revisionId", revision.ID).
 			Msg("[saveSimulation] slot time update complete")
 
-		tx.Where("slot_revision_id = ?", revision.ID).Delete(&models.ThroughputState{})
-		tx.Where("slot_revision_id = ?", revision.ID).Delete(&models.ThroughputSnapshot{})
-
-		if err := writeThroughputStates(tx, revision.ID, resp, airportByWaypoint); err != nil {
-			log.Error().Err(err).Msg("[saveSimulation] writeThroughputStates failed")
-			return err
-		}
-		if err := writeThroughputSnapshots(tx, revision.ID, resp, airportByWaypoint); err != nil {
-			log.Error().Err(err).Msg("[saveSimulation] writeThroughputSnapshots failed")
-			return err
-		}
-
 		return nil
 	})
 	if err != nil {
@@ -697,9 +715,7 @@ func saveSimulationResult(eventID uint, resp simResponseEvent, commentary string
 	}
 	log.Info().Uint("revisionId", revisionID).Msg("[saveSimulation] core transaction committed")
 
-	// Create the draft revision outside the main transaction — it does not need
-	// to be atomic with the slot-time / throughput updates and keeping it inside
-	// was holding the transaction open for seconds.
+	// ── Draft revision (outside transaction) ──────────────────────────────────
 	if len(slotGroupsJSON) > 0 {
 		draftCommentary, _ := json.Marshal(map[string]interface{}{
 			"slotGroups": json.RawMessage(slotGroupsJSON),
@@ -724,6 +740,38 @@ func saveSimulationResult(eventID uint, resp simResponseEvent, commentary string
 	} else {
 		log.Warn().Msg("[saveSimulation] no slotGroups in request body — skipping draft creation")
 	}
+
+	// ── Background: write throughput data, clean up old revisions ─────────────
+	// Snapshots/states for old revisions are purged here, keeping only the newest.
+	// resp is captured by value; revisionID/eventID are primitives — safe for goroutine.
+	go func(rid uint, eid uint, simResp simResponseEvent) {
+		log.Info().Uint("revisionId", rid).Uint("eventId", eid).Msg("[saveSimulation] background throughput write starting")
+
+		// Drop all throughput data for every revision of this event except the current one.
+		database.DB.Exec(
+			"DELETE FROM throughput_snapshots WHERE slot_revision_id IN (SELECT id FROM slot_revisions WHERE event_id = ? AND id != ?)",
+			eid, rid,
+		)
+		database.DB.Exec(
+			"DELETE FROM throughput_states WHERE slot_revision_id IN (SELECT id FROM slot_revisions WHERE event_id = ? AND id != ?)",
+			eid, rid,
+		)
+		// Also replace any existing data for the current revision (handles re-runs).
+		database.DB.Where("slot_revision_id = ?", rid).Delete(&models.ThroughputSnapshot{})
+		database.DB.Where("slot_revision_id = ?", rid).Delete(&models.ThroughputState{})
+
+		airportByWaypoint := airportWaypointLookup(database.DB, eid)
+
+		if err := writeThroughputStates(database.DB, rid, simResp, airportByWaypoint); err != nil {
+			log.Error().Err(err).Msg("[saveSimulation] background writeThroughputStates failed")
+		}
+		if err := writeThroughputSnapshots(database.DB, rid, simResp, airportByWaypoint); err != nil {
+			log.Error().Err(err).Msg("[saveSimulation] background writeThroughputSnapshots failed")
+		}
+
+		log.Info().Uint("revisionId", rid).Msg("[saveSimulation] background throughput write complete")
+		simStatusStore.Delete(uint64(eid))
+	}(revisionID, eventID, resp)
 
 	return revisionID, draftRevisionNumber, nil
 }
@@ -763,8 +811,10 @@ func invokeSimulator(c fiber.Ctx, path string, includeSlots bool, save func(uint
 	ctx, cancel := context.WithTimeout(c.Context(), simulatorTimeout)
 	defer cancel()
 
+	simStatusStore.Store(id, "running")
 	respBody, statusCode, err := callSimulator(ctx, path, body)
 	if err != nil {
+		simStatusStore.Delete(id)
 		log.Error().Err(err).Str("path", path).Msg("[invokeSimulator] simulator call failed")
 		return fiber.NewError(fiber.StatusBadGateway, "simulator request failed: "+err.Error())
 	}
@@ -774,9 +824,11 @@ func invokeSimulator(c fiber.Ctx, path string, includeSlots bool, save func(uint
 		Int("responseBytes", len(respBody)).
 		Msg("[invokeSimulator] simulator responded")
 	if statusCode == http.StatusInternalServerError {
+		simStatusStore.Delete(id)
 		return fiber.NewError(fiber.StatusBadGateway, "simulator calculation error: "+string(respBody))
 	}
 	if statusCode != http.StatusOK {
+		simStatusStore.Delete(id)
 		return fiber.NewError(fiber.StatusBadGateway, fmt.Sprintf("simulator returned %d", statusCode))
 	}
 
@@ -785,6 +837,7 @@ func invokeSimulator(c fiber.Ctx, path string, includeSlots bool, save func(uint
 
 	var simResp simResponseEvent
 	if err := json.Unmarshal(respBody, &simResp); err != nil {
+		simStatusStore.Delete(id)
 		// Log the first 512 bytes of the raw body to help diagnose encoding issues.
 		preview := respBody
 		if len(preview) > 512 {
@@ -804,6 +857,8 @@ func invokeSimulator(c fiber.Ctx, path string, includeSlots bool, save func(uint
 		Int("airportsInResponse", len(simResp.Airports)).
 		Msg("[invokeSimulator] parsed simulator response, calling save")
 
+	simStatusStore.Store(id, "sim_responded")
+
 	commentary := simResp.CalculationParameters.SlotGenerationOutputCommentary
 	if path == "/simulateEvent" {
 		commentary = simResp.CalculationParameters.SimulationOutputCommentary
@@ -811,8 +866,12 @@ func invokeSimulator(c fiber.Ctx, path string, includeSlots bool, save func(uint
 
 	revisionID, draftRevisionNumber, err := save(uint(id), simResp, commentary)
 	if err != nil {
+		simStatusStore.Delete(id)
 		return fiber.NewError(fiber.StatusInternalServerError, "failed to save simulator results: "+err.Error())
 	}
+
+	// Status "saved" — background goroutine will clear it once throughput data is written.
+	simStatusStore.Store(id, "saved")
 
 	resp := fiber.Map{
 		"slotRevisionId":                 revisionID,
