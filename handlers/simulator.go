@@ -6,7 +6,6 @@ import (
 	"encoding/json"
 	"fmt"
 	"io"
-	"math"
 	"net/http"
 	"sort"
 	"strconv"
@@ -165,15 +164,11 @@ type simResponseEvent struct {
 	Slots                 []simResponseSlot       `json:"slots"`
 }
 
-func mapAirport(a models.Airport, departureHours float64) simAirport {
-	if departureHours <= 0 {
-		departureHours = 1
-	}
-	maxPerHour := uint16(math.Ceil(float64(a.MaximumSlots) / departureHours))
+func mapAirport(a models.Airport) simAirport {
 	return simAirport{
 		Id:                     a.WaypointID,
 		Identifier:             a.Waypoint.Identifier,
-		MaximumAircraftPerHour: maxPerHour,
+		MaximumAircraftPerHour: a.MaximumAircraftPerHour,
 		MaximumSlots:           a.MaximumSlots,
 		Latitude:               a.Waypoint.Latitude,
 		Longitude:              a.Waypoint.Longitude,
@@ -255,12 +250,10 @@ func formatDepartureTimeWindow(d models.Duration) string {
 }
 
 func buildSimEvent(event models.VATSIMEvent, revision *models.SlotRevision, includeSlots bool) simEvent {
-	departureHours := time.Duration(event.DepartureTimeWindow).Hours()
-
 	airports := make([]simAirport, 0, len(event.Airports))
 	airportWaypointIDs := make(map[int64]bool, len(event.Airports))
 	for _, a := range event.Airports {
-		airports = append(airports, mapAirport(a, departureHours))
+		airports = append(airports, mapAirport(a))
 		airportWaypointIDs[a.WaypointID] = true
 	}
 
