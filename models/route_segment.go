@@ -16,7 +16,8 @@ type RouteSegment struct {
 }
 
 type RouteSegmentTag struct {
-	ID             uint   `gorm:"primaryKey" json:"id"`
-	RouteSegmentID uint   `gorm:"index;not null" json:"routeSegmentId"`
-	Tag            string `gorm:"not null" json:"tag"`
+	ID                     uint    `gorm:"primaryKey" json:"id"`
+	RouteSegmentID         uint    `gorm:"index;not null" json:"routeSegmentId"`
+	Tag                    string  `gorm:"not null" json:"tag"`
+	MaximumAircraftPerHour *uint16 `json:"maximumAircraftPerHour,omitempty"`
 }

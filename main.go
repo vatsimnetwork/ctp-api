@@ -93,7 +93,11 @@ func main() {
 	api.Get("/events/:eventId/sectors", handlers.ListSectors)
 	api.Post("/events/:eventId/sectors", handlers.CreateSector)
 	api.Put("/sectors/:id", handlers.UpdateSector)
+	api.Patch("/sectors/:id/capacity", handlers.PatchSectorCapacity)
 	api.Delete("/sectors/:id", handlers.DeleteSector)
+
+	api.Get("/events/:eventId/tag-limits", handlers.ListEventTagLimits)
+	api.Patch("/events/:eventId/tag-limits", handlers.UpsertEventTagLimits)
 
 	api.Get("/events/:eventId/slot-revisions", handlers.ListSlotRevisions)
 	api.Post("/events/:eventId/slot-revisions", handlers.CreateSlotRevision)

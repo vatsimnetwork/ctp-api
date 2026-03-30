@@ -87,6 +87,11 @@ type simSlot struct {
 	RouteSegments        []uint `json:"routeSegments"`    // route segment IDs
 }
 
+type simTagLimit struct {
+	Tag          string `json:"tag"`
+	MaximumSlots uint16 `json:"maximumSlots"`
+}
+
 type simEvent struct {
 	Id                    uint                     `json:"id"`
 	Title                 string                   `json:"title"`
@@ -99,6 +104,7 @@ type simEvent struct {
 	Waypoints             []simWaypoint            `json:"waypoints"`
 	RouteSegments         []simRouteSegment        `json:"routeSegments"`
 	Sectors               []simSector              `json:"sectors"`
+	TagLimits             []simTagLimit            `json:"tagLimits"`
 	Slots                 []simSlot                `json:"slots"`
 }
 
@@ -290,10 +296,15 @@ func buildSimEvent(event models.VATSIMEvent, revision *models.SlotRevision, incl
 	for _, r := range event.RouteSegments {
 		for _, s := range r.ProvidedFacilityProgression {
 			if _, exists := sectorByID[s.ID]; !exists {
+				var maxSlots uint16
+				if s.MaximumSlots != nil {
+					maxSlots = *s.MaximumSlots
+				}
 				sectorByID[s.ID] = simSector{
 					Id:                     s.ID,
 					Identifier:             s.Identifier,
 					MaximumAircraftPerHour: s.MaximumAircraftPerHour,
+					MaximumSlots:           maxSlots,
 				}
 			}
 		}
@@ -303,6 +314,26 @@ func buildSimEvent(event models.VATSIMEvent, revision *models.SlotRevision, incl
 		sectors = append(sectors, s)
 	}
 	sort.Slice(sectors, func(i, j int) bool { return sectors[i].Id < sectors[j].Id })
+
+	tagLimitByName := make(map[string]uint16)
+	for _, r := range event.RouteSegments {
+		for _, t := range r.Tags {
+			if t.MaximumAircraftPerHour != nil && *t.MaximumAircraftPerHour > 0 {
+				if _, exists := tagLimitByName[t.Tag]; !exists {
+					tagLimitByName[t.Tag] = *t.MaximumAircraftPerHour
+				}
+			}
+		}
+	}
+	tagLimits := make([]simTagLimit, 0, len(tagLimitByName))
+	departureHours := time.Duration(event.DepartureTimeWindow).Hours()
+	for tag, maxPerHour := range tagLimitByName {
+		tagLimits = append(tagLimits, simTagLimit{
+			Tag:          tag,
+			MaximumSlots: uint16(float64(maxPerHour) * departureHours),
+		})
+	}
+	sort.Slice(tagLimits, func(i, j int) bool { return tagLimits[i].Tag < tagLimits[j].Tag })
 
 	slots := []simSlot{}
 	var slotRevisionNumber uint
@@ -340,6 +371,7 @@ func buildSimEvent(event models.VATSIMEvent, revision *models.SlotRevision, incl
 		Waypoints:     waypoints,
 		RouteSegments: routeSegments,
 		Sectors:       sectors,
+		TagLimits:     tagLimits,
 		Slots:         slots,
 	}
 }
@@ -482,7 +514,7 @@ func writeThroughputSnapshots(tx *gorm.DB, revisionID uint, resp simResponseEven
 	return nil
 }
 
-func saveCalculationResult(eventID uint, resp simResponseEvent, commentary string) (uint, error) {
+func saveCalculationResult(eventID uint, resp simResponseEvent, commentary string) (uint, uint, error) {
 	var revisionID uint
 	err := database.DB.Transaction(func(tx *gorm.DB) error {
 		var maxNumber uint
@@ -524,11 +556,12 @@ func saveCalculationResult(eventID uint, resp simResponseEvent, commentary strin
 
 		return writeThroughputStates(tx, revision.ID, resp, airportByWaypoint)
 	})
-	return revisionID, err
+	return revisionID, 0, err
 }
 
-func saveSimulationResult(eventID uint, resp simResponseEvent, commentary string) (uint, error) {
+func saveSimulationResult(eventID uint, resp simResponseEvent, commentary string, slotGroupsJSON json.RawMessage, capsJSON json.RawMessage) (uint, uint, error) {
 	var revisionID uint
+	var draftRevisionNumber uint
 	err := database.DB.Transaction(func(tx *gorm.DB) error {
 		var revision models.SlotRevision
 		if err := tx.Where("event_id = ?", eventID).Order("number DESC").First(&revision).Error; err != nil {
@@ -551,9 +584,11 @@ func saveSimulationResult(eventID uint, resp simResponseEvent, commentary string
 				"departure_time":         s.DepartureTime.Time,
 				"projected_arrival_time": s.ProjectedArrivalTime.Time,
 			}
-			tx.Model(&models.Slot{}).
+			if res := tx.Model(&models.Slot{}).
 				Where("id = ? AND slot_revision_id = ?", s.Id, revision.ID).
-				Updates(updates)
+				Updates(updates); res.Error != nil {
+				log.Warn().Err(res.Error).Uint("slotId", s.Id).Msg("failed to update slot times")
+			}
 		}
 
 		tx.Where("slot_revision_id = ?", revision.ID).Delete(&models.ThroughputState{})
@@ -562,12 +597,38 @@ func saveSimulationResult(eventID uint, resp simResponseEvent, commentary string
 		if err := writeThroughputStates(tx, revision.ID, resp, airportByWaypoint); err != nil {
 			return err
 		}
-		return writeThroughputSnapshots(tx, revision.ID, resp, airportByWaypoint)
+		if err := writeThroughputSnapshots(tx, revision.ID, resp, airportByWaypoint); err != nil {
+			return err
+		}
+
+		// Create a new draft revision carrying the slot groups and caps for continued editing.
+		if len(slotGroupsJSON) > 0 {
+			draftCommentary, _ := json.Marshal(map[string]interface{}{
+				"slotGroups": json.RawMessage(slotGroupsJSON),
+				"caps":       json.RawMessage(capsJSON),
+				"draft":      true,
+			})
+
+			var maxNumber uint
+			tx.Model(&models.SlotRevision{}).Where("event_id = ?", eventID).Select("COALESCE(MAX(number), 0)").Scan(&maxNumber)
+
+			draft := models.SlotRevision{
+				EventID:                        eventID,
+				Number:                         maxNumber + 1,
+				SlotGenerationOutputCommentary: string(draftCommentary),
+			}
+			if err := tx.Create(&draft).Error; err != nil {
+				return err
+			}
+			draftRevisionNumber = draft.Number
+		}
+
+		return nil
 	})
-	return revisionID, err
+	return revisionID, draftRevisionNumber, err
 }
 
-func invokeSimulator(c fiber.Ctx, path string, includeSlots bool, save func(uint, simResponseEvent, string) (uint, error)) error {
+func invokeSimulator(c fiber.Ctx, path string, includeSlots bool, save func(uint, simResponseEvent, string) (uint, uint, error)) error {
 	if config.C.SimulatorURL == "" {
 		return fiber.NewError(fiber.StatusServiceUnavailable, "simulator not configured")
 	}
@@ -626,16 +687,20 @@ func invokeSimulator(c fiber.Ctx, path string, includeSlots bool, save func(uint
 		commentary = simResp.CalculationParameters.SimulationOutputCommentary
 	}
 
-	revisionID, err := save(uint(id), simResp, commentary)
+	revisionID, draftRevisionNumber, err := save(uint(id), simResp, commentary)
 	if err != nil {
 		return fiber.NewError(fiber.StatusInternalServerError, "failed to save simulator results: "+err.Error())
 	}
 
-	return c.JSON(fiber.Map{
+	resp := fiber.Map{
 		"slotRevisionId":                 revisionID,
 		"slotGenerationOutputCommentary": simResp.CalculationParameters.SlotGenerationOutputCommentary,
 		"simulationOutputCommentary":     simResp.CalculationParameters.SimulationOutputCommentary,
-	})
+	}
+	if draftRevisionNumber > 0 {
+		resp["draftRevisionNumber"] = draftRevisionNumber
+	}
+	return c.JSON(resp)
 }
 
 // PreviewCalculatePayload godoc
@@ -706,14 +771,23 @@ func CalculateSlots(c fiber.Ctx) error {
 //	@Summary	Send event data and current slots to simulator for simulation
 //	@Tags		simulator
 //	@Security	ApiKeyAuth
+//	@Accept		json
 //	@Produce	json
 //	@Param		id	path		int		true	"Event ID"
-//	@Success	200	{object}	object	"{ slotRevisionId: uint }"
+//	@Success	200	{object}	object	"{ slotRevisionId: uint, draftRevisionNumber?: uint }"
 //	@Failure	400	{object}	models.ErrorResponse
 //	@Failure	404	{object}	models.ErrorResponse
 //	@Failure	502	{object}	models.ErrorResponse
 //	@Failure	503	{object}	models.ErrorResponse
 //	@Router		/events/{id}/simulate-slots [post]
 func SimulateSlots(c fiber.Ctx) error {
-	return invokeSimulator(c, "/simulateEvent", true, saveSimulationResult)
+	var body struct {
+		SlotGroups json.RawMessage `json:"slotGroups"`
+		Caps       json.RawMessage `json:"caps"`
+	}
+	_ = c.Bind().JSON(&body) // body is optional; ignore parse errors
+
+	return invokeSimulator(c, "/simulateEvent", true, func(eventID uint, resp simResponseEvent, commentary string) (uint, uint, error) {
+		return saveSimulationResult(eventID, resp, commentary, body.SlotGroups, body.Caps)
+	})
 }

@@ -2,6 +2,7 @@ package models
 
 type Sector struct {
 	ThroughputPoint
+	MaximumSlots     *uint16          `json:"maximumSlots,omitempty"`
 	SectorBoundaries []SectorBoundary `gorm:"foreignKey:SectorID;constraint:OnDelete:CASCADE;" json:"sectorBoundaries,omitempty"`
 	EventID          *uint            `gorm:"index" json:"eventId,omitempty"`
 }

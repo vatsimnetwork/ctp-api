@@ -134,3 +134,31 @@ func DeleteSector(c fiber.Ctx) error {
 
 	return c.JSON(fiber.Map{"success": true})
 }
+
+func PatchSectorCapacity(c fiber.Ctx) error {
+	id, err := strconv.ParseUint(c.Params("id"), 10, 64)
+	if err != nil {
+		return fiber.NewError(fiber.StatusBadRequest, "invalid sector id")
+	}
+
+	var existing models.Sector
+	if database.DB.First(&existing, id).Error != nil {
+		return fiber.NewError(fiber.StatusNotFound, "sector not found")
+	}
+
+	var input struct {
+		MaximumSlots *uint16 `json:"maximumSlots"`
+	}
+	if err := c.Bind().JSON(&input); err != nil {
+		return fiber.NewError(fiber.StatusBadRequest, err.Error())
+	}
+
+	if input.MaximumSlots != nil {
+		if err := database.DB.Model(&existing).UpdateColumn("maximum_slots", *input.MaximumSlots).Error; err != nil {
+			return fiber.NewError(fiber.StatusInternalServerError, err.Error())
+		}
+	}
+
+	database.DB.First(&existing, id)
+	return c.JSON(existing)
+}
