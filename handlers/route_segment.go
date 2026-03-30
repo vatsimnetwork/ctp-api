@@ -26,8 +26,8 @@ type tagInput struct {
 type routeSegmentInput struct {
 	ID                          uint            `json:"id"`
 	Identifier                  string          `json:"identifier"`
-	MaximumAircraftPerHour      uint16          `json:"maximumAircraftPerHour"`
-	MaximumSlots                uint16          `json:"maximumSlots"`
+	MaximumAircraftPerHour      *uint16         `json:"maximumAircraftPerHour,omitempty"`
+	MaximumSlots                *uint16         `json:"maximumSlots,omitempty"`
 	RouteString                 string          `json:"routeString"`
 	RouteSegmentGroup           string          `json:"routeSegmentGroup"`
 	Color                       string          `json:"color"`
@@ -272,7 +272,16 @@ func BatchSaveRouteSegments(c fiber.Ctx) error {
 				EventID:                     input.EventID,
 			}
 			seg.Identifier = input.Identifier
-			seg.MaximumAircraftPerHour = input.MaximumAircraftPerHour
+			if input.MaximumAircraftPerHour != nil {
+				seg.MaximumAircraftPerHour = *input.MaximumAircraftPerHour
+			} else if input.ID != 0 {
+				// Preserve existing value — don't overwrite with 0 when field is omitted.
+				var existing models.RouteSegment
+				tx.Select("maximum_aircraft_per_hour").First(&existing, input.ID)
+				seg.MaximumAircraftPerHour = existing.MaximumAircraftPerHour
+			} else {
+				seg.MaximumAircraftPerHour = 20 // default for new segments
+			}
 
 			if input.ID == 0 {
 				if err := tx.Session(&gorm.Session{FullSaveAssociations: true}).Create(&seg).Error; err != nil {
