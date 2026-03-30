@@ -650,8 +650,8 @@ func saveSimulationResult(eventID uint, resp simResponseEvent, commentary string
 			arrCase := "CASE id"
 			for i, st := range toUpdate {
 				ids[i] = st.id
-				depCase += fmt.Sprintf(" WHEN %d THEN '%s'", st.id, st.dep.UTC().Format("2006-01-02T15:04:05Z"))
-				arrCase += fmt.Sprintf(" WHEN %d THEN '%s'", st.id, st.arr.UTC().Format("2006-01-02T15:04:05Z"))
+				depCase += fmt.Sprintf(" WHEN %d THEN '%s'::timestamptz", st.id, st.dep.UTC().Format("2006-01-02T15:04:05Z"))
+				arrCase += fmt.Sprintf(" WHEN %d THEN '%s'::timestamptz", st.id, st.arr.UTC().Format("2006-01-02T15:04:05Z"))
 			}
 			depCase += " END"
 			arrCase += " END"
