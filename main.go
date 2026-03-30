@@ -84,6 +84,7 @@ func main() {
 	api.Get("/events/:eventId/airports", handlers.ListAirports)
 	api.Post("/events/:eventId/airports", handlers.CreateAirport)
 	api.Put("/airports/:id", handlers.UpdateAirport)
+	api.Patch("/airports/:id/capacity", handlers.PatchAirportCapacity)
 	api.Delete("/airports/:id", handlers.DeleteAirport)
 
 	api.Get("/waypoints", handlers.ListWaypoints)
@@ -109,6 +110,7 @@ func main() {
 	api.Post("/route-segments", handlers.CreateRouteSegment)
 	api.Post("/route-segments/save", handlers.BatchSaveRouteSegments)
 	api.Put("/route-segments/:id", handlers.UpdateRouteSegment)
+	api.Patch("/route-segments/:id/capacity", handlers.PatchRouteSegmentCapacity)
 	api.Delete("/route-segments/:id", handlers.DeleteRouteSegment)
 
 	api.Get("/airways", handlers.ListAirways)

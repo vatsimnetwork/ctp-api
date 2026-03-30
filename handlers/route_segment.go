@@ -192,6 +192,36 @@ func BatchSaveRouteSegments(c fiber.Ctx) error {
 			}
 		}
 
+		// Set waypoint capacity defaults based on role:
+		// - OCA exit points (last fix of an OCA segment) → 20/hr
+		// - All other waypoints → 65535/hr (effectively unlimited)
+		ocaExitIDs := map[int64]struct{}{}
+		for _, seg := range payload.Updates {
+			if strings.EqualFold(seg.RouteSegmentGroup, "OCA") {
+				// find the location with the highest sortOrder
+				var maxOrder int = -1
+				var exitID int64
+				for _, l := range seg.Locations {
+					if l.WaypointID != 0 && int(l.SortOrder) > maxOrder {
+						maxOrder = int(l.SortOrder)
+						exitID = l.WaypointID
+					}
+				}
+				if exitID != 0 {
+					ocaExitIDs[exitID] = struct{}{}
+				}
+			}
+		}
+		for id := range waypointMap {
+			if _, isExit := ocaExitIDs[id]; isExit {
+				tx.Model(&models.Waypoint{}).Where("id = ? AND maximum_aircraft_per_hour != 20", id).
+					Update("maximum_aircraft_per_hour", 20)
+			} else {
+				tx.Model(&models.Waypoint{}).Where("id = ? AND maximum_aircraft_per_hour < 65535", id).
+					Update("maximum_aircraft_per_hour", 65535)
+			}
+		}
+
 		// Upsert global sectors from all facilities strings.
 		allIdents := map[string]struct{}{}
 		for _, seg := range payload.Updates {
@@ -368,4 +398,44 @@ func DeleteRouteSegment(c fiber.Ctx) error {
 	}
 
 	return c.JSON(fiber.Map{"success": true})
+}
+
+// PatchRouteSegmentCapacity godoc
+//
+//@SummaryPatch route segment maximum_aircraft_per_hour
+//@Tagsroute-segments
+//@SecurityApiKeyAuth
+//@Acceptjson
+//@Producejson
+//@Paramidpathinttrue"Route Segment ID"
+//@Success200{object}models.RouteSegment
+//@Failure400{object}models.ErrorResponse
+//@Failure404{object}models.ErrorResponse
+//@Router/route-segments/{id}/capacity [patch]
+func PatchRouteSegmentCapacity(c fiber.Ctx) error {
+id, err := strconv.ParseUint(c.Params("id"), 10, 64)
+if err != nil {
+return fiber.NewError(fiber.StatusBadRequest, "invalid route segment id")
+}
+
+var existing models.RouteSegment
+if database.DB.First(&existing, id).Error != nil {
+return fiber.NewError(fiber.StatusNotFound, "route segment not found")
+}
+
+var input struct {
+MaximumAircraftPerHour *uint16 `json:"maximumAircraftPerHour"`
+}
+if err := c.Bind().JSON(&input); err != nil {
+return fiber.NewError(fiber.StatusBadRequest, err.Error())
+}
+
+if input.MaximumAircraftPerHour != nil {
+if err := database.DB.Model(&existing).UpdateColumn("maximum_aircraft_per_hour", *input.MaximumAircraftPerHour).Error; err != nil {
+return fiber.NewError(fiber.StatusInternalServerError, err.Error())
+}
+}
+
+database.DB.Preload("Tags").Preload("Locations.Waypoint").First(&existing, id)
+return c.JSON(existing)
 }

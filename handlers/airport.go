@@ -175,3 +175,43 @@ func DeleteAirport(c fiber.Ctx) error {
 
 	return c.JSON(fiber.Map{"success": true})
 }
+
+// PatchAirportCapacity godoc
+//
+//	@Summary	Patch airport maximum_slots
+//	@Tags		airports
+//	@Security	ApiKeyAuth
+//	@Accept		json
+//	@Produce	json
+//	@Param		id	path		int						true	"Airport ID"
+//	@Success	200	{object}	models.Airport
+//	@Failure	400	{object}	models.ErrorResponse
+//	@Failure	404	{object}	models.ErrorResponse
+//	@Router		/airports/{id}/capacity [patch]
+func PatchAirportCapacity(c fiber.Ctx) error {
+	id, err := strconv.ParseUint(c.Params("id"), 10, 64)
+	if err != nil {
+		return fiber.NewError(fiber.StatusBadRequest, "invalid airport id")
+	}
+
+	var existing models.Airport
+	if database.DB.First(&existing, id).Error != nil {
+		return fiber.NewError(fiber.StatusNotFound, "airport not found")
+	}
+
+	var input struct {
+		MaximumSlots *uint16 `json:"maximumSlots"`
+	}
+	if err := c.Bind().JSON(&input); err != nil {
+		return fiber.NewError(fiber.StatusBadRequest, err.Error())
+	}
+
+	if input.MaximumSlots != nil {
+		if err := database.DB.Model(&existing).UpdateColumn("maximum_slots", *input.MaximumSlots).Error; err != nil {
+			return fiber.NewError(fiber.StatusInternalServerError, err.Error())
+		}
+	}
+
+	database.DB.Preload("Waypoint").First(&existing, id)
+	return c.JSON(existing)
+}

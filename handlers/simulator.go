@@ -101,6 +101,34 @@ type simEvent struct {
 	Slots                 []simSlot                `json:"slots"`
 }
 
+// simTime is a time.Time that tolerates the simulator's non-RFC3339 timestamps
+// (e.g. "2026-04-25T06:00:00" without timezone) and treats the C# zero-value
+// "0001-01-01T00:00:00" as a Go zero time (IsZero() == true).
+type simTime struct {
+	time.Time
+}
+
+func (t *simTime) UnmarshalJSON(data []byte) error {
+	s := strings.Trim(string(data), `"`)
+	for _, layout := range []string{
+		time.RFC3339Nano,
+		time.RFC3339,
+		"2006-01-02T15:04:05.9999999",
+		"2006-01-02T15:04:05",
+	} {
+		if parsed, err := time.Parse(layout, s); err == nil {
+			if parsed.Year() < 100 {
+				t.Time = time.Time{}
+			} else {
+				t.Time = parsed
+			}
+			return nil
+		}
+	}
+	t.Time = time.Time{}
+	return nil
+}
+
 type simResponseThroughput struct {
 	Id             int64          `json:"id"`
 	MaximumSlots   uint16         `json:"maximumSlots"`
@@ -110,15 +138,16 @@ type simResponseThroughput struct {
 
 type simResponseAirport struct {
 	simResponseThroughput
-	DepartureTimeWindowStart time.Time `json:"departureTimeWindowStart"`
+	DepartureTimeWindowStart simTime `json:"departureTimeWindowStart"`
 }
 
 type simResponseSlot struct {
-	DepartureTime        time.Time `json:"departureTime"`
-	ProjectedArrivalTime time.Time `json:"projectedArrivalTime"`
-	DepartureAirport     int64     `json:"departureAirport"`
-	ArrivalAirport       int64     `json:"arrivalAirport"`
-	RouteSegments        []uint    `json:"routeSegments"`
+	Id                   uint    `json:"id"`
+	DepartureTime        simTime `json:"departureTime"`
+	ProjectedArrivalTime simTime `json:"projectedArrivalTime"`
+	DepartureAirport     int64   `json:"departureAirport"`
+	ArrivalAirport       int64   `json:"arrivalAirport"`
+	RouteSegments        []uint  `json:"routeSegments"`
 }
 
 type simResponseCalcParams struct {
@@ -377,7 +406,8 @@ func writeThroughputStates(tx *gorm.DB, revisionID uint, resp simResponseEvent, 
 	for _, a := range resp.Airports {
 		var ts *time.Time
 		if !a.DepartureTimeWindowStart.IsZero() {
-			ts = &a.DepartureTimeWindowStart
+			t := a.DepartureTimeWindowStart.Time
+			ts = &t
 		}
 		if err := tx.Create(&models.ThroughputState{
 			SlotRevisionID:           revisionID,
@@ -472,8 +502,8 @@ func saveCalculationResult(eventID uint, resp simResponseEvent, commentary strin
 		for _, s := range resp.Slots {
 			slot := models.Slot{
 				SlotRevisionID:       revision.ID,
-				DepartureTime:        s.DepartureTime,
-				ProjectedArrivalTime: s.ProjectedArrivalTime,
+				DepartureTime:        s.DepartureTime.Time,
+				ProjectedArrivalTime: s.ProjectedArrivalTime.Time,
 				DepartureAirportID:   airportByWaypoint[s.DepartureAirport],
 				ArrivalAirportID:     airportByWaypoint[s.ArrivalAirport],
 			}
@@ -510,6 +540,20 @@ func saveSimulationResult(eventID uint, resp simResponseEvent, commentary string
 		}
 
 		airportByWaypoint := airportWaypointLookup(tx, eventID)
+
+		// Update departure/arrival times on each slot using the IDs the simulator echoes back.
+		for _, s := range resp.Slots {
+			if s.Id == 0 {
+				continue
+			}
+			updates := map[string]interface{}{
+				"departure_time":         s.DepartureTime.Time,
+				"projected_arrival_time": s.ProjectedArrivalTime.Time,
+			}
+			tx.Model(&models.Slot{}).
+				Where("id = ? AND slot_revision_id = ?", s.Id, revision.ID).
+				Updates(updates)
+		}
 
 		tx.Where("slot_revision_id = ?", revision.ID).Delete(&models.ThroughputState{})
 		tx.Where("slot_revision_id = ?", revision.ID).Delete(&models.ThroughputSnapshot{})
@@ -573,7 +617,11 @@ func invokeSimulator(c fiber.Ctx, path string, includeSlots bool, save func(uint
 		return fiber.NewError(fiber.StatusInternalServerError, "failed to save simulator results: "+err.Error())
 	}
 
-	return c.JSON(fiber.Map{"slotRevisionId": revisionID})
+	return c.JSON(fiber.Map{
+		"slotRevisionId":                 revisionID,
+		"slotGenerationOutputCommentary": simResp.CalculationParameters.SlotGenerationOutputCommentary,
+		"simulationOutputCommentary":     simResp.CalculationParameters.SimulationOutputCommentary,
+	})
 }
 
 // PreviewCalculatePayload godoc

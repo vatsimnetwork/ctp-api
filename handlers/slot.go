@@ -177,11 +177,34 @@ func AddSlotsToRevision(c fiber.Ctx) error {
 		return fiber.NewError(fiber.StatusBadRequest, err.Error())
 	}
 
-	for i := range slots {
-		slots[i].SlotRevisionID = uint(revisionID)
-	}
+	err = database.DB.Transaction(func(tx *gorm.DB) error {
+		for i := range slots {
+			// Extract route segment IDs before clearing the association to prevent
+			// GORM from attempting to upsert existing route segment records on Create.
+			rsIDs := make([]uint, 0, len(slots[i].RouteSegments))
+			for _, rs := range slots[i].RouteSegments {
+				rsIDs = append(rsIDs, rs.ID)
+			}
+			slots[i].RouteSegments = nil
+			slots[i].SlotRevisionID = uint(revisionID)
 
-	if err := database.DB.Create(&slots).Error; err != nil {
+			if err := tx.Create(&slots[i]).Error; err != nil {
+				return err
+			}
+
+			if len(rsIDs) > 0 {
+				rsegs := make([]models.RouteSegment, 0, len(rsIDs))
+				for _, id := range rsIDs {
+					rsegs = append(rsegs, models.RouteSegment{ThroughputPoint: models.ThroughputPoint{ID: id}})
+				}
+				if err := tx.Model(&slots[i]).Association("RouteSegments").Append(rsegs); err != nil {
+					return err
+				}
+			}
+		}
+		return nil
+	})
+	if err != nil {
 		return fiber.NewError(fiber.StatusInternalServerError, err.Error())
 	}
 
