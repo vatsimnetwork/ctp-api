@@ -782,9 +782,9 @@ func saveSimulationResult(eventID uint, resp simResponseEvent, commentary string
 		database.DB.Model(&models.SlotRevision{}).Where("event_id = ?", eventID).Select("COALESCE(MAX(number), 0)").Scan(&maxNumber)
 
 		draft := models.SlotRevision{
-			EventID:                        eventID,
-			Number:                         maxNumber + 1,
-			SlotGenerationOutputCommentary: string(draftCommentary),
+			EventID:                    eventID,
+			Number:                     maxNumber + 1,
+			SlotPlannerDraftCommentary: string(draftCommentary),
 		}
 		if createErr := database.DB.Create(&draft).Error; createErr != nil {
 			log.Error().Err(createErr).Msg("[saveSimulation] failed to create draft revision")
