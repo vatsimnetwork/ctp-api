@@ -42,6 +42,7 @@ func Connect() {
 		&models.SectorBoundaryCoordinate{},
 		&models.SlotRevision{},
 		&models.Slot{},
+		&models.SlotRouteSegment{},
 		&models.ThroughputState{},
 		&models.ThroughputSnapshot{},
 		&models.Airway{},

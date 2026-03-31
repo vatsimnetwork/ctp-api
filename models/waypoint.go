@@ -6,5 +6,4 @@ type Waypoint struct {
 	Latitude               float64 `gorm:"not null" json:"latitude"`
 	Longitude              float64 `gorm:"not null" json:"longitude"`
 	MaximumAircraftPerHour uint16  `gorm:"default:20" json:"maximumAircraftPerHour"`
-	MaximumSlots           uint16  `json:"maximumSlots"`
 }

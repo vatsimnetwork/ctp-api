@@ -99,27 +99,27 @@ type simSector struct {
 }
 
 type simRouteSegment struct {
-	Id                          uint   `json:"id"`
-	Identifier                  string `json:"identifier"`
-	MaximumAircraftPerHour      uint16 `json:"maximumAircraftPerHour"`
-	MaximumSlots                uint16 `json:"maximumSlots"`
-	RouteString                 string `json:"routeString"`
-	RouteSegmentGroup           string `json:"routeSegmentGroup"`
-	Color                       string `json:"color"`
-	Enabled                     bool   `json:"enabled"`
-	RouteSegmentTagIds          []uint `json:"routeSegmentTagIds"`
-	ProvidedFacilityProgression []uint `json:"providedFacilityProgression"`
-	Locations                   []int64 `json:"locations"`
-	RouteRevision               uint   `json:"routeRevision"`
+	Id                          uint    `json:"id"`
+	Identifier                  string  `json:"identifier"`
+	MaximumAircraftPerHour      uint16  `json:"maximumAircraftPerHour"`
+	MaximumSlots                uint16  `json:"maximumSlots"`
+	RouteString                 string  `json:"routeString"`
+	RouteSegmentGroup           string  `json:"group"`
+	Color                       string  `json:"color"`
+	Enabled                     bool    `json:"enabled"`
+	RouteSegmentTagIds          []uint  `json:"tagLimitIds"`
+	ProvidedFacilityProgression []uint  `json:"providedFacilityProgressionIds"`
+	Locations                   []int64 `json:"locationIds"`
+	RouteRevision               uint    `json:"routeRevision"`
 }
 
 type simSlot struct {
 	Id                   uint   `json:"id"`
 	DepartureTime        string `json:"departureTime"`
 	ProjectedArrivalTime string `json:"projectedArrivalTime"`
-	DepartureAirport     int64  `json:"departureAirport"` // airport WaypointID
-	ArrivalAirport       int64  `json:"arrivalAirport"`   // airport WaypointID
-	RouteSegments        []uint `json:"routeSegments"`    // route segment IDs
+	DepartureAirport     int64  `json:"departureAirportId"` // airport WaypointID
+	ArrivalAirport       int64  `json:"arrivalAirportId"`   // airport WaypointID
+	RouteSegments        []uint `json:"routeSegmentIds"`    // route segment IDs
 }
 
 type simTagLimit struct {
@@ -176,7 +176,7 @@ type simResponseThroughput struct {
 	Id             int64          `json:"id"`
 	MaximumSlots   uint16         `json:"maximumSlots"`
 	SlotsAllocated uint16         `json:"slotsAllocated"`
-	SlotsFrames    map[int][]uint `json:"slotsAnalysisFramesViaMinutesFromSynchronizationTime"`
+	SlotsFrames    map[int][]uint `json:"analysisFramesViaMinutesFromSynchronizationTimeSlotIds"`
 }
 
 type simResponseAirport struct {
@@ -188,9 +188,9 @@ type simResponseSlot struct {
 	Id                   uint    `json:"id"`
 	DepartureTime        simTime `json:"departureTime"`
 	ProjectedArrivalTime simTime `json:"projectedArrivalTime"`
-	DepartureAirport     int64   `json:"departureAirport"`
-	ArrivalAirport       int64   `json:"arrivalAirport"`
-	RouteSegments        []uint  `json:"routeSegments"`
+	DepartureAirport     int64   `json:"departureAirportId"`
+	ArrivalAirport       int64   `json:"arrivalAirportId"`
+	RouteSegments        []uint  `json:"routeSegmentIds"`
 }
 
 type simResponseCalcParams struct {
@@ -218,7 +218,7 @@ func mapAirport(a models.Airport) simAirport {
 	}
 }
 
-func mapRouteSegment(r models.RouteSegment, airportWaypointIDs map[int64]bool) simRouteSegment {
+func mapRouteSegment(r models.RouteSegment, airportWaypointIDs map[int64]bool, departureHours float64) simRouteSegment {
 	tagIDs := make([]uint, 0, len(r.Tags))
 	for _, t := range r.Tags {
 		if t.TagID != nil {
@@ -240,10 +240,22 @@ func mapRouteSegment(r models.RouteSegment, airportWaypointIDs map[int64]bool) s
 		pfp = append(pfp, s.ID)
 	}
 
+	var rsMaxSlots uint16
+	if r.MaximumAircraftPerHour >= 65535 {
+		rsMaxSlots = 65535
+	} else {
+		computed := uint32(float64(r.MaximumAircraftPerHour) * departureHours)
+		if computed > 65534 {
+			computed = 65534
+		}
+		rsMaxSlots = uint16(computed)
+	}
+
 	return simRouteSegment{
 		Id:                          r.ID,
 		Identifier:                  r.Identifier,
 		MaximumAircraftPerHour:      r.MaximumAircraftPerHour,
+		MaximumSlots:                rsMaxSlots,
 		RouteString:                 r.RouteString,
 		RouteSegmentGroup:           r.RouteSegmentGroup,
 		Color:                       r.Color,
@@ -294,6 +306,8 @@ func formatDepartureTimeWindow(d models.Duration) string {
 }
 
 func buildSimEvent(event models.VATSIMEvent, revision *models.SlotRevision, includeSlots bool) simEvent {
+	departureHours := time.Duration(event.DepartureTimeWindow).Hours()
+
 	airports := make([]simAirport, 0, len(event.Airports))
 	airportWaypointIDs := make(map[int64]bool, len(event.Airports))
 	for _, a := range event.Airports {
@@ -308,11 +322,21 @@ func buildSimEvent(event models.VATSIMEvent, revision *models.SlotRevision, incl
 				continue
 			}
 			if _, exists := waypointByID[l.WaypointID]; !exists {
+				var wpMaxSlots uint16
+				if l.Waypoint.MaximumAircraftPerHour >= 65535 {
+					wpMaxSlots = 65535
+				} else {
+					computed := uint32(float64(l.Waypoint.MaximumAircraftPerHour) * departureHours)
+					if computed > 65534 {
+						computed = 65534
+					}
+					wpMaxSlots = uint16(computed)
+				}
 				waypointByID[l.WaypointID] = simWaypoint{
 					Id:                     l.WaypointID,
 					Identifier:             l.Waypoint.Identifier,
 					MaximumAircraftPerHour: l.Waypoint.MaximumAircraftPerHour,
-					MaximumSlots:           l.Waypoint.MaximumSlots,
+					MaximumSlots:           wpMaxSlots,
 					Latitude:               l.Waypoint.Latitude,
 					Longitude:              l.Waypoint.Longitude,
 				}
@@ -327,10 +351,8 @@ func buildSimEvent(event models.VATSIMEvent, revision *models.SlotRevision, incl
 
 	routeSegments := make([]simRouteSegment, 0, len(event.RouteSegments))
 	for _, r := range event.RouteSegments {
-		routeSegments = append(routeSegments, mapRouteSegment(r, airportWaypointIDs))
+		routeSegments = append(routeSegments, mapRouteSegment(r, airportWaypointIDs, departureHours))
 	}
-
-	departureHours := time.Duration(event.DepartureTimeWindow).Hours()
 
 	sectorByID := make(map[uint]simSector)
 	for _, r := range event.RouteSegments {
@@ -649,12 +671,12 @@ func saveCalculationResult(eventID uint, resp simResponseEvent, commentary strin
 			if err := tx.Create(&slot).Error; err != nil {
 				return err
 			}
-			if len(s.RouteSegments) > 0 {
-				rsegs := make([]models.RouteSegment, 0, len(s.RouteSegments))
-				for _, rsID := range s.RouteSegments {
-					rsegs = append(rsegs, models.RouteSegment{ThroughputPoint: models.ThroughputPoint{ID: rsID}})
-				}
-				if err := tx.Model(&slot).Association("RouteSegments").Append(rsegs); err != nil {
+			for i, rsID := range s.RouteSegments {
+				if err := tx.Create(&models.SlotRouteSegment{
+					SlotID:         slot.ID,
+					RouteSegmentID: rsID,
+					Order:          uint(i),
+				}).Error; err != nil {
 					return err
 				}
 			}

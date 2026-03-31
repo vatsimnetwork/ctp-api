@@ -27,7 +27,6 @@ type routeSegmentInput struct {
 	ID                          uint            `json:"id"`
 	Identifier                  string          `json:"identifier"`
 	MaximumAircraftPerHour      *uint16         `json:"maximumAircraftPerHour,omitempty"`
-	MaximumSlots                *uint16         `json:"maximumSlots,omitempty"`
 	RouteString                 string          `json:"routeString"`
 	RouteSegmentGroup           string          `json:"routeSegmentGroup"`
 	Color                       string          `json:"color"`

@@ -11,5 +11,5 @@ type Slot struct {
 	DepartureAirport     Airport        `gorm:"foreignKey:DepartureAirportID" json:"departureAirport,omitempty"`
 	ArrivalAirportID     uint           `json:"arrivalAirportId"`
 	ArrivalAirport       Airport        `gorm:"foreignKey:ArrivalAirportID" json:"arrivalAirport,omitempty"`
-	RouteSegments        []RouteSegment `gorm:"many2many:slot_route_segments;" json:"routeSegments,omitempty"`
+	RouteSegments        []RouteSegment `gorm:"many2many:slot_route_segments;joinForeignKey:SlotID;joinReferences:RouteSegmentID" json:"routeSegments,omitempty"`
 }

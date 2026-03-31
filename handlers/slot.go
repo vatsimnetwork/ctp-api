@@ -57,7 +57,9 @@ func GetLatestSlotRevision(c fiber.Ctx) error {
 		Preload("Slots").
 		Preload("Slots.DepartureAirport").
 		Preload("Slots.ArrivalAirport").
-		Preload("Slots.RouteSegments").
+		Preload("Slots.RouteSegments", func(db *gorm.DB) *gorm.DB {
+			return db.Order(`"slot_route_segments"."order" ASC`)
+		}).
 		Preload("ThroughputStates").
 		Where("event_id = ?", eventID).
 		Order("number DESC").
@@ -96,7 +98,9 @@ func GetSlotRevision(c fiber.Ctx) error {
 		Preload("Slots").
 		Preload("Slots.DepartureAirport").
 		Preload("Slots.ArrivalAirport").
-		Preload("Slots.RouteSegments").
+		Preload("Slots.RouteSegments", func(db *gorm.DB) *gorm.DB {
+			return db.Order(`"slot_route_segments"."order" ASC`)
+		}).
 		Preload("ThroughputStates").
 		Where("event_id = ? AND number = ?", eventID, number).
 		First(&revision)
@@ -192,12 +196,12 @@ func AddSlotsToRevision(c fiber.Ctx) error {
 				return err
 			}
 
-			if len(rsIDs) > 0 {
-				rsegs := make([]models.RouteSegment, 0, len(rsIDs))
-				for _, id := range rsIDs {
-					rsegs = append(rsegs, models.RouteSegment{ThroughputPoint: models.ThroughputPoint{ID: id}})
-				}
-				if err := tx.Model(&slots[i]).Association("RouteSegments").Append(rsegs); err != nil {
+			for order, rsID := range rsIDs {
+				if err := tx.Create(&models.SlotRouteSegment{
+					SlotID:         slots[i].ID,
+					RouteSegmentID: rsID,
+					Order:          uint(order),
+				}).Error; err != nil {
 					return err
 				}
 			}
