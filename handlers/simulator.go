@@ -143,9 +143,6 @@ type simEvent struct {
 	Slots                 []simSlot                `json:"slots"`
 }
 
-// simTime is a time.Time that tolerates the simulator's non-RFC3339 timestamps
-// (e.g. "2026-04-25T06:00:00" without timezone) and treats the C# zero-value
-// "0001-01-01T00:00:00" as a Go zero time (IsZero() == true).
 type simTime struct {
 	time.Time
 }
@@ -155,14 +152,14 @@ func (t *simTime) UnmarshalJSON(data []byte) error {
 	for _, layout := range []string{
 		time.RFC3339Nano,
 		time.RFC3339,
-		"2006-01-02T15:04:05.9999999",
-		"2006-01-02T15:04:05",
+		"2006-01-02T15:04:05.9999999Z07:00",
 	} {
 		if parsed, err := time.Parse(layout, s); err == nil {
-			if parsed.Year() < 100 {
+			// C# DateTimeOffset.MinValue (year 1) is the zero sentinel
+			if parsed.Year() <= 1 {
 				t.Time = time.Time{}
 			} else {
-				t.Time = parsed
+				t.Time = parsed.UTC()
 			}
 			return nil
 		}
