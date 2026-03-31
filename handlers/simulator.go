@@ -58,7 +58,6 @@ func GetLatestSimulatorResponse(c fiber.Ctx) error {
 }
 
 type simCalculationParameters struct {
-	RecalculateMaximumAirportSlots                        bool    `json:"recalculateMaximumAirportSlots"`
 	IntendedSlotGenerationMode                            uint    `json:"intendedSlotGenerationMode"`
 	DepartureTimeWindowOffsetSynchronizationLongitude     float64 `json:"departureTimeWindowOffsetSynchronizationLongitude"`
 	SimulationAnalysisResolutionInMinutes                 uint    `json:"simulationAnalysisResolutionInMinutes"`
@@ -388,9 +387,9 @@ func buildSimEvent(event models.VATSIMEvent, revision *models.SlotRevision, incl
 	// Build tagLimits from all EventTag records that have a limit set.
 	// Key by ID so each EventTag appears exactly once regardless of how many route segments share it.
 	type tagEntry struct {
-		id           uint
-		name         string
-		maxPerHour   uint16
+		id         uint
+		name       string
+		maxPerHour uint16
 	}
 	tagLimitByID := make(map[uint]tagEntry)
 	for _, r := range event.RouteSegments {
@@ -449,7 +448,6 @@ func buildSimEvent(event models.VATSIMEvent, revision *models.SlotRevision, incl
 		Date:                event.Date.Format("2006-01-02"),
 		DepartureTimeWindow: formatDepartureTimeWindow(event.DepartureTimeWindow),
 		CalculationParameters: simCalculationParameters{
-			RecalculateMaximumAirportSlots:                        event.RecalculateMaximumAirportSlots,
 			IntendedSlotGenerationMode:                            uint(event.IntendedSlotGenerationMode),
 			DepartureTimeWindowOffsetSynchronizationLongitude:     event.DepartureTimeWindowOffsetSynchronizationLongitude,
 			SimulationAnalysisResolutionInMinutes:                 event.SimulationAnalysisResolutionInMinutes,
