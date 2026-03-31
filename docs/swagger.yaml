@@ -374,8 +374,6 @@ definitions:
         $ref: '#/definitions/models.SlotGenerationMode'
       intendedWaypointThroughputCalculationMode:
         $ref: '#/definitions/models.WaypointThroughputCalculationMode'
-      recalculateMaximumAirportSlots:
-        type: boolean
       routeRevision:
         type: integer
       routeSegments:

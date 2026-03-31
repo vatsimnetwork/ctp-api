@@ -2810,9 +2810,7 @@ const docTemplate = `{
                 "intendedWaypointThroughputCalculationMode": {
                     "$ref": "#/definitions/models.WaypointThroughputCalculationMode"
                 },
-                "recalculateMaximumAirportSlots": {
-                    "type": "boolean"
-                },
+
                 "routeRevision": {
                     "type": "integer"
                 },
