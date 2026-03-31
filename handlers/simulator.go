@@ -241,8 +241,8 @@ func mapRouteSegment(r models.RouteSegment, airportWaypointIDs map[int64]bool, d
 		rsMaxSlots = 65535
 	} else {
 		computed := uint32(float64(r.MaximumAircraftPerHour) * departureHours)
-		if computed > 65534 {
-			computed = 65534
+		if computed > 65535 {
+			computed = 65535
 		}
 		rsMaxSlots = uint16(computed)
 	}
@@ -323,8 +323,8 @@ func buildSimEvent(event models.VATSIMEvent, revision *models.SlotRevision, incl
 					wpMaxSlots = 65535
 				} else {
 					computed := uint32(float64(l.Waypoint.MaximumAircraftPerHour) * departureHours)
-					if computed > 65534 {
-						computed = 65534
+					if computed > 65535 {
+						computed = 65535
 					}
 					wpMaxSlots = uint16(computed)
 				}
@@ -354,15 +354,14 @@ func buildSimEvent(event models.VATSIMEvent, revision *models.SlotRevision, incl
 	for _, r := range event.RouteSegments {
 		for _, s := range r.ProvidedFacilityProgression {
 			if _, exists := sectorByID[s.ID]; !exists {
-				// Compute MaximumSlots from MaximumAircraftPerHour * departure window.
-				// 65535 means unlimited (sentinel); otherwise cap at 65534 to avoid overflow.
+				// 65535 means unlimited (sentinel); pin at 65535 if computed exceeds it.
 				var maxSlots uint16
 				if s.MaximumAircraftPerHour >= 65535 {
 					maxSlots = 65535
 				} else {
 					computed := uint32(float64(s.MaximumAircraftPerHour) * departureHours)
-					if computed > 65534 {
-						computed = 65534
+					if computed > 65535 {
+						computed = 65535
 					}
 					maxSlots = uint16(computed)
 				}
@@ -413,8 +412,8 @@ func buildSimEvent(event models.VATSIMEvent, revision *models.SlotRevision, incl
 			maxSlots = 65535
 		} else {
 			computed := uint32(float64(te.maxPerHour) * departureHours)
-			if computed > 65534 {
-				computed = 65534
+			if computed > 65535 {
+				computed = 65535
 			}
 			maxSlots = uint16(computed)
 		}
@@ -488,7 +487,7 @@ func fetchSimulatorData(id uint64) (*models.VATSIMEvent, *models.SlotRevision, e
 		Preload("Slots.RouteSegments.Tags.TagRef").
 		Preload("Slots.RouteSegments.Locations.Waypoint").
 		Preload("Slots.RouteSegments.ProvidedFacilityProgression").
-		Where("event_id = ?", id).
+		Where("event_id = ? AND EXISTS (SELECT 1 FROM slots WHERE slot_revision_id = slot_revisions.id)", id).
 		Order("number DESC").
 		First(&revision)
 
@@ -697,7 +696,7 @@ func saveSimulationResult(eventID uint, resp simResponseEvent, commentary string
 	// they don't block the response.
 	err := database.DB.Transaction(func(tx *gorm.DB) error {
 		var revision models.SlotRevision
-		if err := tx.Where("event_id = ?", eventID).Order("number DESC").First(&revision).Error; err != nil {
+		if err := tx.Where("event_id = ? AND EXISTS (SELECT 1 FROM slots WHERE slot_revision_id = slot_revisions.id)", eventID).Order("number DESC").First(&revision).Error; err != nil {
 			log.Error().Err(err).Uint("eventId", eventID).Msg("[saveSimulation] could not find slot revision")
 			return fiber.NewError(fiber.StatusNotFound, "no slot revision found to attach simulation results to")
 		}
