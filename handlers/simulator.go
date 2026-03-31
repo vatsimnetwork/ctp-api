@@ -494,6 +494,7 @@ func fetchSimulatorData(id uint64) (*models.VATSIMEvent, *models.SlotRevision, e
 	if q.Error != nil {
 		return &event, nil, nil
 	}
+	sortSlotRouteSegments(revision.Slots)
 	return &event, &revision, nil
 }
 
