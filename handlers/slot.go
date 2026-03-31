@@ -1,6 +1,7 @@
 package handlers
 
 import (
+	"sort"
 	"strconv"
 
 	"github.com/gofiber/fiber/v3"
@@ -8,6 +9,36 @@ import (
 	"github.com/vatsimnetwork/ctp-api/models"
 	"gorm.io/gorm"
 )
+
+// sortSlotRouteSegments reorders each slot's RouteSegments slice according to
+// the order column in slot_route_segments. It issues a single query for all
+// slot IDs so it is efficient for large revisions.
+func sortSlotRouteSegments(slots []models.Slot) {
+	if len(slots) == 0 {
+		return
+	}
+	slotIDs := make([]uint, len(slots))
+	for i, s := range slots {
+		slotIDs[i] = s.ID
+	}
+
+	var srsRows []models.SlotRouteSegment
+	database.DB.Where(`"slot_id" IN ?`, slotIDs).Order(`"order" ASC`).Find(&srsRows)
+
+	type key struct{ slotID, rsID uint }
+	orderMap := make(map[key]uint, len(srsRows))
+	for _, srs := range srsRows {
+		orderMap[key{srs.SlotID, srs.RouteSegmentID}] = srs.Order
+	}
+
+	for i := range slots {
+		sid := slots[i].ID
+		sort.Slice(slots[i].RouteSegments, func(a, b int) bool {
+			return orderMap[key{sid, slots[i].RouteSegments[a].ID}] <
+				orderMap[key{sid, slots[i].RouteSegments[b].ID}]
+		})
+	}
+}
 
 // ListSlotRevisions godoc
 //
@@ -57,9 +88,7 @@ func GetLatestSlotRevision(c fiber.Ctx) error {
 		Preload("Slots").
 		Preload("Slots.DepartureAirport").
 		Preload("Slots.ArrivalAirport").
-		Preload("Slots.RouteSegments", func(db *gorm.DB) *gorm.DB {
-			return db.Order(`"slot_route_segments"."order" ASC`)
-		}).
+		Preload("Slots.RouteSegments").
 		Preload("ThroughputStates").
 		Where("event_id = ?", eventID).
 		Order("number DESC").
@@ -67,6 +96,8 @@ func GetLatestSlotRevision(c fiber.Ctx) error {
 	if result.Error != nil {
 		return fiber.NewError(fiber.StatusNotFound, "no slot revisions found for this event")
 	}
+
+	sortSlotRouteSegments(revision.Slots)
 
 	return c.JSON(revision)
 }
@@ -98,15 +129,15 @@ func GetSlotRevision(c fiber.Ctx) error {
 		Preload("Slots").
 		Preload("Slots.DepartureAirport").
 		Preload("Slots.ArrivalAirport").
-		Preload("Slots.RouteSegments", func(db *gorm.DB) *gorm.DB {
-			return db.Order(`"slot_route_segments"."order" ASC`)
-		}).
+		Preload("Slots.RouteSegments").
 		Preload("ThroughputStates").
 		Where("event_id = ? AND number = ?", eventID, number).
 		First(&revision)
 	if result.Error != nil {
 		return fiber.NewError(fiber.StatusNotFound, "slot revision not found")
 	}
+
+	sortSlotRouteSegments(revision.Slots)
 
 	return c.JSON(revision)
 }
