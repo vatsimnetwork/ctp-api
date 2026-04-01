@@ -9,7 +9,7 @@ type VATSIMEvent struct {
 	Date                time.Time `gorm:"type:date" json:"date"`
 	DepartureTimeWindow Duration  `gorm:"default:10800000000000" json:"departureTimeWindow" swaggertype:"string" example:"3h0m0s"`
 
-	IntendedSlotGenerationMode                            SlotGenerationMode                        `gorm:"default:0" json:"intendedSlotGenerationMode"`
+	IntendedSlotGenerationMode                            SlotGenerationMode                        `gorm:"default:2" json:"intendedSlotGenerationMode"`
 	DepartureTimeWindowOffsetSynchronizationLongitude     float64                                   `gorm:"default:-30" json:"departureTimeWindowOffsetSynchronizationLongitude"`
 	SimulationAnalysisResolutionInMinutes                 uint                                      `gorm:"default:2" json:"simulationAnalysisResolutionInMinutes"`
 	ShouldSimulationUseActualWeatherForecastData          bool                                      `json:"shouldSimulationUseActualWeatherForecastData"`

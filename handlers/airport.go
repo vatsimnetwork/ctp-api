@@ -2,6 +2,7 @@ package handlers
 
 import (
 	"strconv"
+	"time"
 
 	"github.com/gofiber/fiber/v3"
 	"github.com/vatsimnetwork/ctp-api/database"
@@ -208,6 +209,55 @@ func PatchAirportCapacity(c fiber.Ctx) error {
 
 	if input.MaximumSlots != nil {
 		if err := database.DB.Model(&existing).UpdateColumn("maximum_slots", *input.MaximumSlots).Error; err != nil {
+			return fiber.NewError(fiber.StatusInternalServerError, err.Error())
+		}
+	}
+
+	database.DB.Preload("Waypoint").First(&existing, id)
+	return c.JSON(existing)
+}
+
+// PatchAirportDepartureTimeWindowStart godoc
+//
+//	@Summary	Patch airport departure_time_window_start
+//	@Tags		airports
+//	@Security	ApiKeyAuth
+//	@Accept		json
+//	@Produce	json
+//	@Param		id	path		int						true	"Airport ID"
+//	@Success	200	{object}	models.Airport
+//	@Failure	400	{object}	models.ErrorResponse
+//	@Failure	404	{object}	models.ErrorResponse
+//	@Router		/airports/{id}/departure-time-window-start [patch]
+func PatchAirportDepartureTimeWindowStart(c fiber.Ctx) error {
+	id, err := strconv.ParseUint(c.Params("id"), 10, 64)
+	if err != nil {
+		return fiber.NewError(fiber.StatusBadRequest, "invalid airport id")
+	}
+
+	var existing models.Airport
+	if database.DB.First(&existing, id).Error != nil {
+		return fiber.NewError(fiber.StatusNotFound, "airport not found")
+	}
+
+	var input struct {
+		DepartureTimeWindowStart *string `json:"departureTimeWindowStart"`
+	}
+	if err := c.Bind().JSON(&input); err != nil {
+		return fiber.NewError(fiber.StatusBadRequest, err.Error())
+	}
+
+	if input.DepartureTimeWindowStart != nil {
+		t, err := time.Parse(time.RFC3339, *input.DepartureTimeWindowStart)
+		if err != nil {
+			return fiber.NewError(fiber.StatusBadRequest, "invalid departureTimeWindowStart format, expected RFC3339")
+		}
+		tUTC := t.UTC()
+		if err := database.DB.Model(&existing).Update("departure_time_window_start", tUTC).Error; err != nil {
+			return fiber.NewError(fiber.StatusInternalServerError, err.Error())
+		}
+	} else {
+		if err := database.DB.Model(&existing).Update("departure_time_window_start", nil).Error; err != nil {
 			return fiber.NewError(fiber.StatusInternalServerError, err.Error())
 		}
 	}

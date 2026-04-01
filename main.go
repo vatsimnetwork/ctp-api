@@ -87,6 +87,7 @@ func main() {
 	api.Post("/events/:eventId/airports", handlers.CreateAirport)
 	api.Put("/airports/:id", handlers.UpdateAirport)
 	api.Patch("/airports/:id/capacity", handlers.PatchAirportCapacity)
+	api.Patch("/airports/:id/departure-time-window-start", handlers.PatchAirportDepartureTimeWindowStart)
 	api.Delete("/airports/:id", handlers.DeleteAirport)
 
 	api.Get("/waypoints", handlers.ListWaypoints)

@@ -3,9 +3,9 @@ package models
 type SlotGenerationMode int
 
 const (
-	SlotGenerationModeMaximizeSlots    SlotGenerationMode = iota
-	SlotGenerationModeRandom
-	SlotGenerationModeVoteProportional
+	SlotGenerationModeRandom              SlotGenerationMode = iota
+	SlotGenerationModeMaximizeAirportPairs
+	SlotGenerationModeMaximizeSlots
 )
 
 type DepartureTimeWindowOffsetsCalculationMode int

@@ -81,13 +81,14 @@ type simWaypoint struct {
 }
 
 type simAirport struct {
-	Id                     int64   `json:"id"`
-	Identifier             string  `json:"identifier"`
-	MaximumAircraftPerHour uint16  `json:"maximumAircraftPerHour"`
-	MaximumSlots           uint16  `json:"maximumSlots"`
-	Latitude               float64 `json:"latitude"`
-	Longitude              float64 `json:"longitude"`
-	NumberOfVotes          uint16  `json:"numberOfVotes"`
+	Id                       int64   `json:"id"`
+	Identifier               string  `json:"identifier"`
+	MaximumAircraftPerHour   uint16  `json:"maximumAircraftPerHour"`
+	MaximumSlots             uint16  `json:"maximumSlots"`
+	Latitude                 float64 `json:"latitude"`
+	Longitude                float64 `json:"longitude"`
+	NumberOfVotes            uint16  `json:"numberOfVotes"`
+	DepartureTimeWindowStart *string `json:"departureTimeWindowStart,omitempty"`
 }
 
 type simSector struct {
@@ -203,14 +204,20 @@ type simResponseEvent struct {
 }
 
 func mapAirport(a models.Airport) simAirport {
+	var dtws *string
+	if a.DepartureTimeWindowStart != nil {
+		s := a.DepartureTimeWindowStart.UTC().Format(time.RFC3339)
+		dtws = &s
+	}
 	return simAirport{
-		Id:                     a.WaypointID,
-		Identifier:             a.Waypoint.Identifier,
-		MaximumAircraftPerHour: a.MaximumAircraftPerHour,
-		MaximumSlots:           a.MaximumSlots,
-		Latitude:               a.Waypoint.Latitude,
-		Longitude:              a.Waypoint.Longitude,
-		NumberOfVotes:          a.NumberOfVotes,
+		Id:                       a.WaypointID,
+		Identifier:               a.Waypoint.Identifier,
+		MaximumAircraftPerHour:   a.MaximumAircraftPerHour,
+		MaximumSlots:             a.MaximumSlots,
+		Latitude:                 a.Waypoint.Latitude,
+		Longitude:                a.Waypoint.Longitude,
+		NumberOfVotes:            a.NumberOfVotes,
+		DepartureTimeWindowStart: dtws,
 	}
 }
 
@@ -380,12 +387,12 @@ func buildSimEvent(event models.VATSIMEvent, revision *models.SlotRevision, incl
 	}
 	sort.Slice(sectors, func(i, j int) bool { return sectors[i].Id < sectors[j].Id })
 
-	// Build tagLimits from all EventTag records that have a limit set.
+	// Build tagLimits from all EventTag records on the event's route segments.
 	// Key by ID so each EventTag appears exactly once regardless of how many route segments share it.
 	type tagEntry struct {
 		id         uint
 		name       string
-		maxPerHour uint16
+		maxPerHour *uint16
 	}
 	tagLimitByID := make(map[uint]tagEntry)
 	for _, r := range event.RouteSegments {
@@ -393,14 +400,11 @@ func buildSimEvent(event models.VATSIMEvent, revision *models.SlotRevision, incl
 			if t.TagID == nil {
 				continue
 			}
-			// Include all tags with a configured limit (not nil, not the unlimited sentinel 65535).
-			if t.TagRef.MaximumAircraftPerHour != nil && *t.TagRef.MaximumAircraftPerHour < 65535 {
-				if _, exists := tagLimitByID[*t.TagID]; !exists {
-					tagLimitByID[*t.TagID] = tagEntry{
-						id:         *t.TagID,
-						name:       t.TagRef.Name,
-						maxPerHour: *t.TagRef.MaximumAircraftPerHour,
-					}
+			if _, exists := tagLimitByID[*t.TagID]; !exists {
+				tagLimitByID[*t.TagID] = tagEntry{
+					id:         *t.TagID,
+					name:       t.TagRef.Name,
+					maxPerHour: t.TagRef.MaximumAircraftPerHour,
 				}
 			}
 		}
@@ -408,10 +412,10 @@ func buildSimEvent(event models.VATSIMEvent, revision *models.SlotRevision, incl
 	tagLimits := make([]simTagLimit, 0, len(tagLimitByID))
 	for _, te := range tagLimitByID {
 		var maxSlots uint16
-		if te.maxPerHour >= 65535 {
+		if te.maxPerHour == nil || *te.maxPerHour >= 65535 {
 			maxSlots = 65535
 		} else {
-			computed := uint32(float64(te.maxPerHour) * departureHours)
+			computed := uint32(float64(*te.maxPerHour) * departureHours)
 			if computed > 65535 {
 				computed = 65535
 			}
@@ -523,6 +527,41 @@ func airportWaypointLookup(tx *gorm.DB, eventID uint) map[int64]uint {
 		m[a.WaypointID] = a.ID
 	}
 	return m
+}
+
+func updateAirportDepartureTimeWindows(db *gorm.DB, resp simResponseEvent, airportByWaypoint map[int64]uint) {
+	for _, a := range resp.Airports {
+		if a.DepartureTimeWindowStart.IsZero() {
+			continue
+		}
+		airportID := airportByWaypoint[a.Id]
+		if airportID == 0 {
+			continue
+		}
+		t := a.DepartureTimeWindowStart.Time
+		db.Model(&models.Airport{}).Where("id = ?", airportID).Update("departure_time_window_start", t)
+	}
+}
+
+func updateAirportEarliestArrivals(db *gorm.DB, resp simResponseEvent, airportByWaypoint map[int64]uint) {
+	// Find the earliest non-zero ProjectedArrivalTime per arrival airport waypointID.
+	earliest := make(map[int64]time.Time)
+	for _, s := range resp.Slots {
+		if s.ProjectedArrivalTime.IsZero() {
+			continue
+		}
+		t := s.ProjectedArrivalTime.Time
+		if prev, ok := earliest[s.ArrivalAirport]; !ok || t.Before(prev) {
+			earliest[s.ArrivalAirport] = t
+		}
+	}
+	for waypointID, t := range earliest {
+		airportID := airportByWaypoint[waypointID]
+		if airportID == 0 {
+			continue
+		}
+		db.Model(&models.Airport{}).Where("id = ?", airportID).Update("earliest_arrival_time", t)
+	}
 }
 
 func writeThroughputStates(tx *gorm.DB, revisionID uint, resp simResponseEvent, airportByWaypoint map[int64]uint) error {
@@ -679,6 +718,11 @@ func saveCalculationResult(eventID uint, resp simResponseEvent, commentary strin
 
 		return writeThroughputStates(tx, revision.ID, resp, airportByWaypoint)
 	})
+	if err == nil {
+		airportByWaypoint := airportWaypointLookup(database.DB, eventID)
+		updateAirportDepartureTimeWindows(database.DB, resp, airportByWaypoint)
+		updateAirportEarliestArrivals(database.DB, resp, airportByWaypoint)
+	}
 	return revisionID, 0, err
 }
 
@@ -820,6 +864,8 @@ func saveSimulationResult(eventID uint, resp simResponseEvent, commentary string
 		if err := writeThroughputStates(database.DB, rid, simResp, airportByWaypoint); err != nil {
 			log.Error().Err(err).Msg("[saveSimulation] background writeThroughputStates failed")
 		}
+		updateAirportDepartureTimeWindows(database.DB, simResp, airportByWaypoint)
+		updateAirportEarliestArrivals(database.DB, simResp, airportByWaypoint)
 		if err := writeThroughputSnapshots(database.DB, rid, simResp, airportByWaypoint); err != nil {
 			log.Error().Err(err).Msg("[saveSimulation] background writeThroughputSnapshots failed")
 		}
