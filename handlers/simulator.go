@@ -124,7 +124,7 @@ type simSlot struct {
 
 type simTagLimit struct {
 	Id           uint   `json:"id"`
-	Tag          string `json:"tag"`
+	Tag          string `json:"identifier"`
 	MaximumSlots uint16 `json:"maximumSlots"`
 }
 

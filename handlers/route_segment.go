@@ -246,7 +246,8 @@ func BatchSaveRouteSegments(c fiber.Ctx) error {
 		}
 
 		for _, input := range payload.Updates {
-			// Resolve facilities string ("EISN,EGGX") to Sector records.
+			// Resolve facilities string ("EISN EGGX") to Sector records.
+			// An empty Facilities string explicitly clears PFP — no fallback.
 			var resolvedSectors []models.Sector
 			if input.Facilities != "" {
 				for _, ident := range strings.Fields(input.Facilities) {
@@ -254,10 +255,12 @@ func BatchSaveRouteSegments(c fiber.Ctx) error {
 						resolvedSectors = append(resolvedSectors, s)
 					}
 				}
-			}
-			// Fall back to any explicitly provided objects (admin edits via API).
-			if len(resolvedSectors) == 0 {
-				resolvedSectors = input.ProvidedFacilityProgression
+				// Fall back to any explicitly provided objects only when the
+				// facilities string is non-empty but none of its identifiers
+				// resolved (e.g. all are event-specific sectors not in sectorByIdent).
+				if len(resolvedSectors) == 0 {
+					resolvedSectors = input.ProvidedFacilityProgression
+				}
 			}
 
 			seg := models.RouteSegment{
@@ -356,6 +359,30 @@ func BatchSaveRouteSegments(c fiber.Ctx) error {
 			}
 		}
 
+		// Clean up orphaned Sectors: delete global sectors (event_id IS NULL) and
+		// event-specific sectors that are no longer referenced by any route segment.
+		if err := tx.Exec(`
+			DELETE FROM sectors
+			WHERE event_id IS NULL
+			AND id NOT IN (
+				SELECT DISTINCT sector_id FROM route_segment_sectors WHERE sector_id IS NOT NULL
+			)`).Error; err != nil {
+			return err
+		}
+		for eid := range affectedEventIDs {
+			if err := tx.Exec(`
+				DELETE FROM sectors
+				WHERE event_id = ?
+				AND id NOT IN (
+					SELECT DISTINCT rss.sector_id
+					FROM route_segment_sectors rss
+					INNER JOIN route_segments rs ON rs.id = rss.route_segment_id
+					WHERE rs.event_id = ? AND rss.sector_id IS NOT NULL
+				)`, eid, eid).Error; err != nil {
+				return err
+			}
+		}
+
 		return nil
 	})
 
@@ -437,6 +464,13 @@ func DeleteRouteSegment(c fiber.Ctx) error {
 	if result.RowsAffected == 0 {
 		return fiber.NewError(fiber.StatusNotFound, "route segment not found")
 	}
+
+	// Clean up any sectors that are now unreferenced (global and event-specific).
+	database.DB.Exec(`
+		DELETE FROM sectors
+		WHERE id NOT IN (
+			SELECT DISTINCT sector_id FROM route_segment_sectors WHERE sector_id IS NOT NULL
+		)`)
 
 	return c.JSON(fiber.Map{"success": true})
 }
