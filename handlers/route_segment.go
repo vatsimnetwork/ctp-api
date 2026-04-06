@@ -475,6 +475,70 @@ func DeleteRouteSegment(c fiber.Ctx) error {
 	return c.JSON(fiber.Map{"success": true})
 }
 
+// ReparseAllFacilities godoc
+//
+//	@Summary	Re-parse facilities strings and rebuild route_segment_sectors for all route segments
+//	@Tags		route-segments
+//	@Security	ApiKeyAuth
+//	@Produce	json
+//	@Success	200	{object}	models.SuccessResponse
+//	@Failure	500	{object}	models.ErrorResponse
+//	@Router		/route-segments/reparse-facilities [post]
+func ReparseAllFacilities(c fiber.Ctx) error {
+	err := database.DB.Transaction(func(tx *gorm.DB) error {
+		var segments []models.RouteSegment
+		if err := tx.Find(&segments).Error; err != nil {
+			return err
+		}
+
+		// Upsert any missing global sectors from all facilities strings.
+		allIdents := map[string]struct{}{}
+		for _, seg := range segments {
+			for _, ident := range strings.Fields(seg.Facilities) {
+				allIdents[ident] = struct{}{}
+			}
+		}
+		for ident := range allIdents {
+			var count int64
+			tx.Model(&models.Sector{}).Where("identifier = ? AND event_id IS NULL", ident).Count(&count)
+			if count == 0 {
+				s := models.Sector{}
+				s.Identifier = ident
+				s.MaximumAircraftPerHour = 20
+				tx.Create(&s)
+			}
+		}
+
+		var globalSectors []models.Sector
+		tx.Where("event_id IS NULL").Find(&globalSectors)
+		sectorByIdent := make(map[string]models.Sector, len(globalSectors))
+		for _, s := range globalSectors {
+			sectorByIdent[s.Identifier] = s
+		}
+
+		for i := range segments {
+			seg := &segments[i]
+			var resolvedSectors []models.Sector
+			for _, ident := range strings.Fields(seg.Facilities) {
+				if s, found := sectorByIdent[ident]; found {
+					resolvedSectors = append(resolvedSectors, s)
+				}
+			}
+			if err := tx.Model(seg).Association("ProvidedFacilityProgression").Replace(resolvedSectors); err != nil {
+				return err
+			}
+		}
+
+		return nil
+	})
+
+	if err != nil {
+		return fiber.NewError(fiber.StatusInternalServerError, err.Error())
+	}
+
+	return c.JSON(fiber.Map{"success": true})
+}
+
 // PatchRouteSegmentCapacity godoc
 //
 //@SummaryPatch route segment maximum_aircraft_per_hour

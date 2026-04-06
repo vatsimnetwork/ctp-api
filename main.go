@@ -116,6 +116,7 @@ func main() {
 	api.Get("/events/:eventId/route-segments", handlers.ListEventRouteSegments)
 	api.Post("/route-segments", handlers.CreateRouteSegment)
 	api.Post("/route-segments/save", handlers.BatchSaveRouteSegments)
+	api.Post("/route-segments/reparse-facilities", handlers.ReparseAllFacilities)
 	api.Put("/route-segments/:id", handlers.UpdateRouteSegment)
 	api.Patch("/route-segments/:id/capacity", handlers.PatchRouteSegmentCapacity)
 	api.Delete("/route-segments/:id", handlers.DeleteRouteSegment)
