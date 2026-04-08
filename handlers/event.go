@@ -229,3 +229,69 @@ func GetSimulatorData(c fiber.Ctx) error {
 		"revision": revision,
 	})
 }
+
+// GetSimulatorDataLatestWithSlots godoc
+//
+//	@Summary	Get simulator data for the latest revision that has slots
+//	@Tags		events
+//	@Security	ApiKeyAuth
+//	@Produce	json
+//	@Param		id	path		int	true	"Event ID"
+//	@Success	200	{object}	models.SimulatorDataResponse
+//	@Failure	400	{object}	models.ErrorResponse
+//	@Failure	404	{object}	models.ErrorResponse
+//	@Router		/events/{id}/simulator-data/latest-with-slots [get]
+func GetSimulatorDataLatestWithSlots(c fiber.Ctx) error {
+	id, err := strconv.ParseUint(c.Params("id"), 10, 64)
+	if err != nil {
+		return fiber.NewError(fiber.StatusBadRequest, "invalid event id")
+	}
+
+	var event models.VATSIMEvent
+	result := database.DB.
+		Preload("Airports").
+		Preload("Airports.Waypoint").
+		Preload("RouteSegments").
+		Preload("RouteSegments.Tags").
+		Preload("RouteSegments.Locations").
+		Preload("RouteSegments.Locations.Waypoint").
+		Preload("RouteSegments.ProvidedFacilityProgression").
+		Preload("RouteSegments.ProvidedFacilityProgression.SectorBoundaries").
+		Preload("RouteSegments.ProvidedFacilityProgression.SectorBoundaries.Coordinates").
+		Preload("Sectors").
+		Preload("Sectors.SectorBoundaries").
+		Preload("Sectors.SectorBoundaries.Coordinates").
+		First(&event, id)
+	if result.Error != nil {
+		return fiber.NewError(fiber.StatusNotFound, "event not found")
+	}
+
+	var revision models.SlotRevision
+	query := database.DB.
+		Preload("Slots").
+		Preload("Slots.DepartureAirport").
+		Preload("Slots.DepartureAirport.Waypoint").
+		Preload("Slots.ArrivalAirport").
+		Preload("Slots.ArrivalAirport.Waypoint").
+		Preload("Slots.RouteSegments").
+		Preload("Slots.RouteSegments.Tags").
+		Preload("Slots.RouteSegments.Locations").
+		Preload("Slots.RouteSegments.Locations.Waypoint").
+		Preload("Slots.RouteSegments.ProvidedFacilityProgression").
+		Preload("ThroughputStates").
+		Preload("ThroughputSnapshots").
+		Where("event_id = ? AND EXISTS (SELECT 1 FROM slots WHERE slots.slot_revision_id = slot_revisions.id LIMIT 1)", id).
+		Order("number DESC")
+
+	if query.First(&revision).Error != nil {
+		return c.JSON(fiber.Map{
+			"event":    event,
+			"revision": nil,
+		})
+	}
+
+	return c.JSON(fiber.Map{
+		"event":    event,
+		"revision": revision,
+	})
+}

@@ -191,8 +191,8 @@ type simResponseSlot struct {
 }
 
 type simResponseCalcParams struct {
-	SlotGenerationOutputCommentary string `json:"slotGenerationOutputCommentary"`
-	SimulationOutputCommentary     string `json:"simulationOutputCommentary"`
+	SlotGenerationOutputComments []string `json:"slotGenerationOutputComments"`
+	SimulationOutputComments     []string `json:"simulationOutputComments"`
 }
 
 type simResponseEvent struct {
@@ -200,6 +200,7 @@ type simResponseEvent struct {
 	Airports              []simResponseAirport    `json:"airports"`
 	Waypoints             []simResponseThroughput `json:"waypoints"`
 	RouteSegments         []simResponseThroughput `json:"routeSegments"`
+	Sectors               []simResponseThroughput `json:"sectors"`
 	Slots                 []simResponseSlot       `json:"slots"`
 }
 
@@ -565,7 +566,7 @@ func updateAirportEarliestArrivals(db *gorm.DB, resp simResponseEvent, airportBy
 }
 
 func writeThroughputStates(tx *gorm.DB, revisionID uint, resp simResponseEvent, airportByWaypoint map[int64]uint) error {
-	rows := make([]models.ThroughputState, 0, len(resp.Airports)+len(resp.Waypoints)+len(resp.RouteSegments))
+	rows := make([]models.ThroughputState, 0, len(resp.Airports)+len(resp.Waypoints)+len(resp.RouteSegments)+len(resp.Sectors))
 
 	for _, a := range resp.Airports {
 		var ts *time.Time
@@ -600,6 +601,15 @@ func writeThroughputStates(tx *gorm.DB, revisionID uint, resp simResponseEvent, 
 			SlotsAllocated:      r.SlotsAllocated,
 		})
 	}
+	for _, s := range resp.Sectors {
+		rows = append(rows, models.ThroughputState{
+			SlotRevisionID:      revisionID,
+			ThroughputPointType: "sector",
+			ThroughputPointID:   s.Id,
+			MaximumSlots:        s.MaximumSlots,
+			SlotsAllocated:      s.SlotsAllocated,
+		})
+	}
 
 	if len(rows) == 0 {
 		return nil
@@ -622,6 +632,11 @@ func writeThroughputSnapshots(tx *gorm.DB, revisionID uint, resp simResponseEven
 	}
 	for _, r := range resp.RouteSegments {
 		for _, ids := range r.SlotsFrames {
+			total += len(ids)
+		}
+	}
+	for _, s := range resp.Sectors {
+		for _, ids := range s.SlotsFrames {
 			total += len(ids)
 		}
 	}
@@ -662,6 +677,19 @@ func writeThroughputSnapshots(tx *gorm.DB, revisionID uint, resp simResponseEven
 					SlotRevisionID:      revisionID,
 					ThroughputPointType: "route_segment",
 					ThroughputPointID:   r.Id,
+					MinuteOffset:        minuteOffset,
+					SlotID:              slotID,
+				})
+			}
+		}
+	}
+	for _, s := range resp.Sectors {
+		for minuteOffset, slotIDs := range s.SlotsFrames {
+			for _, slotID := range slotIDs {
+				rows = append(rows, models.ThroughputSnapshot{
+					SlotRevisionID:      revisionID,
+					ThroughputPointType: "sector",
+					ThroughputPointID:   s.Id,
 					MinuteOffset:        minuteOffset,
 					SlotID:              slotID,
 				})
@@ -963,9 +991,9 @@ func invokeSimulator(c fiber.Ctx, path string, includeSlots bool, save func(uint
 
 	simStatusStore.Store(id, "sim_responded")
 
-	commentary := simResp.CalculationParameters.SlotGenerationOutputCommentary
+	commentary := strings.Join(simResp.CalculationParameters.SlotGenerationOutputComments, "\n")
 	if path == "/simulateEvent" {
-		commentary = simResp.CalculationParameters.SimulationOutputCommentary
+		commentary = strings.Join(simResp.CalculationParameters.SimulationOutputComments, "\n")
 	}
 
 	revisionID, draftRevisionNumber, err := save(uint(id), simResp, commentary)
@@ -979,8 +1007,8 @@ func invokeSimulator(c fiber.Ctx, path string, includeSlots bool, save func(uint
 
 	resp := fiber.Map{
 		"slotRevisionId":                 revisionID,
-		"slotGenerationOutputCommentary": simResp.CalculationParameters.SlotGenerationOutputCommentary,
-		"simulationOutputCommentary":     simResp.CalculationParameters.SimulationOutputCommentary,
+		"slotGenerationOutputCommentary": strings.Join(simResp.CalculationParameters.SlotGenerationOutputComments, "\n"),
+		"simulationOutputCommentary":     strings.Join(simResp.CalculationParameters.SimulationOutputComments, "\n"),
 	}
 	if draftRevisionNumber > 0 {
 		resp["draftRevisionNumber"] = draftRevisionNumber
