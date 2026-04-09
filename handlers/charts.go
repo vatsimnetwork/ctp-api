@@ -172,7 +172,7 @@ func ChartsSectors(c fiber.Ctx) error {
 	}
 
 	var sectors []models.Sector
-	if err := database.DB.Where("event_id = ?", id).Find(&sectors).Error; err != nil {
+	if err := database.DB.Where("event_id = ? OR event_id IS NULL", id).Find(&sectors).Error; err != nil {
 		return err
 	}
 
