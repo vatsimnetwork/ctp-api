@@ -184,7 +184,7 @@ func GetSimulatorData(c fiber.Ctx) error {
 		Preload("RouteSegments.ProvidedFacilityProgression").
 		Preload("RouteSegments.ProvidedFacilityProgression.SectorBoundaries").
 		Preload("RouteSegments.ProvidedFacilityProgression.SectorBoundaries.Coordinates").
-		Preload("Sectors").
+		Preload("Sectors", "event_id IS NULL OR event_id = ?", id).
 		Preload("Sectors.SectorBoundaries").
 		Preload("Sectors.SectorBoundaries.Coordinates").
 		First(&event, id)
@@ -258,7 +258,7 @@ func GetSimulatorDataLatestWithSlots(c fiber.Ctx) error {
 		Preload("RouteSegments.ProvidedFacilityProgression").
 		Preload("RouteSegments.ProvidedFacilityProgression.SectorBoundaries").
 		Preload("RouteSegments.ProvidedFacilityProgression.SectorBoundaries.Coordinates").
-		Preload("Sectors").
+		Preload("Sectors", "event_id IS NULL OR event_id = ?", id).
 		Preload("Sectors.SectorBoundaries").
 		Preload("Sectors.SectorBoundaries.Coordinates").
 		First(&event, id)
