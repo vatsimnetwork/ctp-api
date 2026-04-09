@@ -440,7 +440,6 @@ func buildSimEvent(event models.VATSIMEvent, revision *models.SlotRevision, incl
 			}
 		}
 	}
-	fmt.Println(uint(event.IntendedDepartureTimeWindowOffsetsCalculationMode))
 
 	return simEvent{
 		Id:                  event.ID,

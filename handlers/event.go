@@ -125,6 +125,68 @@ func UpdateEvent(c fiber.Ctx) error {
 	return c.JSON(existing)
 }
 
+// PatchEventCalculationParams godoc
+//
+//	@Summary	Patch event calculation parameters
+//	@Tags		events
+//	@Security	ApiKeyAuth
+//	@Accept		json
+//	@Produce	json
+//	@Param		id	path		int						true	"Event ID"
+//	@Success	200	{object}	models.VATSIMEvent
+//	@Failure	400	{object}	models.ErrorResponse
+//	@Failure	404	{object}	models.ErrorResponse
+//	@Router		/events/{id}/calculation-params [patch]
+func PatchEventCalculationParams(c fiber.Ctx) error {
+	id, err := strconv.ParseUint(c.Params("id"), 10, 64)
+	if err != nil {
+		return fiber.NewError(fiber.StatusBadRequest, "invalid event id")
+	}
+
+	var existing models.VATSIMEvent
+	if database.DB.First(&existing, id).Error != nil {
+		return fiber.NewError(fiber.StatusNotFound, "event not found")
+	}
+
+	// Bind to a map so zero-value booleans/ints from the JSON body are preserved.
+	var body map[string]interface{}
+	if err := c.Bind().JSON(&body); err != nil {
+		return fiber.NewError(fiber.StatusBadRequest, err.Error())
+	}
+
+	// Only allow updating calculation parameter columns. Map camelCase JSON keys
+	// to snake_case GORM column names so zero values (false, 0) are written correctly.
+	allowed := map[string]string{
+		"intendedSlotGenerationMode":                            "intended_slot_generation_mode",
+		"departureTimeWindowOffsetSynchronizationLongitude":     "departure_time_window_offset_synchronization_longitude",
+		"simulationAnalysisResolutionInMinutes":                 "simulation_analysis_resolution_in_minutes",
+		"shouldSimulationUseActualWeatherForecastData":          "should_simulation_use_actual_weather_forecast_data",
+		"intendedDepartureTimeWindowOffsetsCalculationMode":     "intended_departure_time_window_offsets_calculation_mode",
+		"departureTimeWindowOffsetSynchronizationTimeOfDay":     "departure_time_window_offset_synchronization_time_of_day",
+		"calculateThroughputDataOnlyForManuallyProvidedSectors": "calculate_throughput_data_only_for_manually_provided_sectors",
+		"intendedWaypointThroughputCalculationMode":             "intended_waypoint_throughput_calculation_mode",
+		"thresholdToCheckIfAirplaneIsCountedAtWaypointInNm":     "threshold_to_check_if_airplane_is_counted_at_waypoint_in_nm",
+		"calculationFallbackGroundSpeed":                        "calculation_fallback_ground_speed",
+		"highSimulationAccuracy":                                "high_simulation_accuracy",
+	}
+
+	updates := make(map[string]interface{}, len(body))
+	for jsonKey, colName := range allowed {
+		if val, ok := body[jsonKey]; ok {
+			updates[colName] = val
+		}
+	}
+
+	if len(updates) > 0 {
+		if err := database.DB.Model(&existing).Updates(updates).Error; err != nil {
+			return fiber.NewError(fiber.StatusInternalServerError, err.Error())
+		}
+	}
+
+	database.DB.First(&existing, id)
+	return c.JSON(existing)
+}
+
 // DeleteEvent godoc
 //
 //	@Summary	Delete event
