@@ -232,7 +232,7 @@ func BatchSaveRouteSegments(c fiber.Ctx) error {
 			if count == 0 {
 				s := models.Sector{}
 				s.Identifier = ident
-				s.MaximumAircraftPerHour = 20
+				s.MaximumAircraftPerHour = 65535
 				tx.Create(&s)
 			}
 		}
@@ -292,6 +292,7 @@ func BatchSaveRouteSegments(c fiber.Ctx) error {
 				seg.ID = input.ID
 				tx.Where("route_segment_id = ?", input.ID).Delete(&models.RouteSegmentTag{})
 				tx.Where("route_segment_id = ?", input.ID).Delete(&models.Location{})
+				tx.Exec("DELETE FROM route_segment_sectors WHERE route_segment_id = ?", input.ID)
 				if err := tx.Session(&gorm.Session{FullSaveAssociations: true}).Save(&seg).Error; err != nil {
 					return err
 				}
@@ -457,7 +458,7 @@ func ReparseAllFacilities(c fiber.Ctx) error {
 			if count == 0 {
 				s := models.Sector{}
 				s.Identifier = ident
-				s.MaximumAircraftPerHour = 20
+				s.MaximumAircraftPerHour = 65535
 				tx.Create(&s)
 			}
 		}
