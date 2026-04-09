@@ -39,7 +39,6 @@ type routeSegmentInput struct {
 	EventID                     *uint           `json:"eventId,omitempty"`
 }
 
-
 // ListAllRouteSegments godoc
 //
 //	@Summary	List all route segments
@@ -55,11 +54,11 @@ func ListAllRouteSegments(c fiber.Ctx) error {
 
 	var segments []models.RouteSegment
 	query := database.DB.Preload("Tags.TagRef").Preload("Locations.Waypoint")
-	
+
 	if group != "" {
 		query = query.Where("route_segment_group = ?", group)
 	}
-	
+
 	if err := query.Find(&segments).Error; err != nil {
 		return fiber.NewError(fiber.StatusInternalServerError, err.Error())
 	}
@@ -337,52 +336,6 @@ func BatchSaveRouteSegments(c fiber.Ctx) error {
 			}
 		}
 
-		// Clean up orphaned EventTags: delete any EventTag for each affected event
-		// that is no longer referenced by any RouteSegmentTag.
-		affectedEventIDs := map[uint]struct{}{}
-		for _, input := range payload.Updates {
-			if input.EventID != nil {
-				affectedEventIDs[*input.EventID] = struct{}{}
-			}
-		}
-		for eid := range affectedEventIDs {
-			if err := tx.Exec(`
-				DELETE FROM event_tags
-				WHERE event_id = ?
-				AND id NOT IN (
-					SELECT DISTINCT rst.tag_id
-					FROM route_segment_tags rst
-					INNER JOIN route_segments rs ON rs.id = rst.route_segment_id
-					WHERE rs.event_id = ? AND rst.tag_id IS NOT NULL
-				)`, eid, eid).Error; err != nil {
-				return err
-			}
-		}
-
-		// Clean up orphaned Sectors: delete global sectors (event_id IS NULL) and
-		// event-specific sectors that are no longer referenced by any route segment.
-		if err := tx.Exec(`
-			DELETE FROM sectors
-			WHERE event_id IS NULL
-			AND id NOT IN (
-				SELECT DISTINCT sector_id FROM route_segment_sectors WHERE sector_id IS NOT NULL
-			)`).Error; err != nil {
-			return err
-		}
-		for eid := range affectedEventIDs {
-			if err := tx.Exec(`
-				DELETE FROM sectors
-				WHERE event_id = ?
-				AND id NOT IN (
-					SELECT DISTINCT rss.sector_id
-					FROM route_segment_sectors rss
-					INNER JOIN route_segments rs ON rs.id = rss.route_segment_id
-					WHERE rs.event_id = ? AND rss.sector_id IS NOT NULL
-				)`, eid, eid).Error; err != nil {
-				return err
-			}
-		}
-
 		return nil
 	})
 
@@ -541,40 +494,40 @@ func ReparseAllFacilities(c fiber.Ctx) error {
 
 // PatchRouteSegmentCapacity godoc
 //
-//@SummaryPatch route segment maximum_aircraft_per_hour
-//@Tagsroute-segments
-//@SecurityApiKeyAuth
-//@Acceptjson
-//@Producejson
-//@Paramidpathinttrue"Route Segment ID"
-//@Success200{object}models.RouteSegment
-//@Failure400{object}models.ErrorResponse
-//@Failure404{object}models.ErrorResponse
-//@Router/route-segments/{id}/capacity [patch]
+// @SummaryPatch route segment maximum_aircraft_per_hour
+// @Tagsroute-segments
+// @SecurityApiKeyAuth
+// @Acceptjson
+// @Producejson
+// @Paramidpathinttrue"Route Segment ID"
+// @Success200{object}models.RouteSegment
+// @Failure400{object}models.ErrorResponse
+// @Failure404{object}models.ErrorResponse
+// @Router/route-segments/{id}/capacity [patch]
 func PatchRouteSegmentCapacity(c fiber.Ctx) error {
-id, err := strconv.ParseUint(c.Params("id"), 10, 64)
-if err != nil {
-return fiber.NewError(fiber.StatusBadRequest, "invalid route segment id")
-}
+	id, err := strconv.ParseUint(c.Params("id"), 10, 64)
+	if err != nil {
+		return fiber.NewError(fiber.StatusBadRequest, "invalid route segment id")
+	}
 
-var existing models.RouteSegment
-if database.DB.First(&existing, id).Error != nil {
-return fiber.NewError(fiber.StatusNotFound, "route segment not found")
-}
+	var existing models.RouteSegment
+	if database.DB.First(&existing, id).Error != nil {
+		return fiber.NewError(fiber.StatusNotFound, "route segment not found")
+	}
 
-var input struct {
-MaximumAircraftPerHour *uint16 `json:"maximumAircraftPerHour"`
-}
-if err := c.Bind().JSON(&input); err != nil {
-return fiber.NewError(fiber.StatusBadRequest, err.Error())
-}
+	var input struct {
+		MaximumAircraftPerHour *uint16 `json:"maximumAircraftPerHour"`
+	}
+	if err := c.Bind().JSON(&input); err != nil {
+		return fiber.NewError(fiber.StatusBadRequest, err.Error())
+	}
 
-if input.MaximumAircraftPerHour != nil {
-if err := database.DB.Model(&existing).UpdateColumn("maximum_aircraft_per_hour", *input.MaximumAircraftPerHour).Error; err != nil {
-return fiber.NewError(fiber.StatusInternalServerError, err.Error())
-}
-}
+	if input.MaximumAircraftPerHour != nil {
+		if err := database.DB.Model(&existing).UpdateColumn("maximum_aircraft_per_hour", *input.MaximumAircraftPerHour).Error; err != nil {
+			return fiber.NewError(fiber.StatusInternalServerError, err.Error())
+		}
+	}
 
-database.DB.Preload("Tags.TagRef").Preload("Locations.Waypoint").First(&existing, id)
-return c.JSON(existing)
+	database.DB.Preload("Tags.TagRef").Preload("Locations.Waypoint").First(&existing, id)
+	return c.JSON(existing)
 }
