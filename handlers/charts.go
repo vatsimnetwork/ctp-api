@@ -2,6 +2,7 @@ package handlers
 
 import (
 	"fmt"
+	"math"
 	"strconv"
 	"time"
 
@@ -201,15 +202,25 @@ func ChartsSectors(c fiber.Ctx) error {
 	}
 
 	type bucketEntry struct {
-		Label string `json:"label"`
-		Count int    `json:"count"`
+		Label       string `json:"label"`
+		PeakCount   int    `json:"peakCount"`
+		UniqueCount int    `json:"uniqueCount"`
 	}
 	type sectorEntry struct {
-		Identifier   string        `json:"identifier"`
-		MaxAcPerHour uint16        `json:"maxAcPerHour"`
-		HasTimings   bool          `json:"hasTimings"`
-		TotalSlots   int           `json:"totalSlots"`
-		Buckets      []bucketEntry `json:"buckets"`
+		Identifier             string        `json:"identifier"`
+		MaxAcPerHour           uint16        `json:"maxAcPerHour"`
+		HasTimings             bool          `json:"hasTimings"`
+		TotalSlots             int           `json:"totalSlots"`
+		AvgDwellMinutes        float64       `json:"avgDwellMinutes"`
+		EstimatedMaxOccupancy  int           `json:"estimatedMaxOccupancy"`
+		EstimatedTotalOccupancy int          `json:"estimatedTotalOccupancy"`
+		Buckets                []bucketEntry `json:"buckets"`
+	}
+
+	// The simulator step size is stored directly on the event — no need to infer it from data gaps.
+	analysisResolution := int(event.SimulationAnalysisResolutionInMinutes)
+	if analysisResolution == 0 {
+		analysisResolution = 2 // safe fallback if the field was never set
 	}
 
 	result := make([]sectorEntry, 0, len(sectors))
@@ -217,21 +228,46 @@ func ChartsSectors(c fiber.Ctx) error {
 		snaps := snapsBySector[s.ID]
 		hasTimings := len(snaps) > 0
 
-		bucketSlots := map[int]map[uint]bool{}
-		allSlotIDs := map[uint]bool{}
+		// --- Step 2: Build 20-minute occupancy buckets ---
+		//
+		// Each snapshot row says "slot X was inside this sector at minute Y" (a single tick).
+		// We first count unique slots at each individual tick (the true instantaneous occupancy),
+		// then for each 20-minute window we take the PEAK tick count within that window.
+		//
+		// Why peak-per-tick rather than unique slots across the whole window?
+		// If a sector has a short dwell time (say 8 min), many aircraft enter and leave within
+		// a single 20-min window, so the cumulative unique count would be far higher than the
+		// number ever present at one moment — making it incomparable to Little's Law's
+		// instantaneous occupancy estimate. Peak-per-tick stays in the same unit.
+		tickSlots := map[int]map[uint]bool{}
 		for _, sn := range snaps {
-			bucket := floorDivCharts(sn.MinuteOffset, 20)
-			if bucketSlots[bucket] == nil {
-				bucketSlots[bucket] = map[uint]bool{}
+			if tickSlots[sn.MinuteOffset] == nil {
+				tickSlots[sn.MinuteOffset] = map[uint]bool{}
 			}
-			bucketSlots[bucket][sn.SlotID] = true
-			allSlotIDs[sn.SlotID] = true
+			tickSlots[sn.MinuteOffset][sn.SlotID] = true
+		}
+
+		// For each 20-minute bucket, find the highest single-tick count (peak instantaneous
+		// occupancy) and also the cumulative unique slots across the window (total flow).
+		bucketPeak := map[int]int{}
+		bucketUnique := map[int]map[uint]bool{}
+		for offset, slots := range tickSlots {
+			bucket := floorDivCharts(offset, 20)
+			if count := len(slots); count > bucketPeak[bucket] {
+				bucketPeak[bucket] = count
+			}
+			if bucketUnique[bucket] == nil {
+				bucketUnique[bucket] = map[uint]bool{}
+			}
+			for id := range slots {
+				bucketUnique[bucket][id] = true
+			}
 		}
 
 		var buckets []bucketEntry
 		if hasTimings {
 			minBucket, maxBucket := int(^uint(0)>>1), -int(^uint(0)>>1)-1
-			for b := range bucketSlots {
+			for b := range bucketPeak {
 				if b < minBucket {
 					minBucket = b
 				}
@@ -241,16 +277,86 @@ func ChartsSectors(c fiber.Ctx) error {
 			}
 			for b := minBucket; b <= maxBucket; b++ {
 				label := syncBase.Add(time.Duration(b*20) * time.Minute).UTC().Format("15:04Z")
-				buckets = append(buckets, bucketEntry{Label: label, Count: len(bucketSlots[b])})
+				buckets = append(buckets, bucketEntry{
+					Label:       label,
+					PeakCount:   bucketPeak[b],
+					UniqueCount: len(bucketUnique[b]),
+				})
+			}
+		}
+
+		// --- Step 3: Estimate maximum sector occupancy via Little's Law ---
+		//
+		// The problem: maximumAircraftPerHour is a SLOT ASSIGNMENT RATE (e.g. "assign at most
+		// 30 slots/hr to routes through this sector"). The chart shows OCCUPANCY — how many
+		// aircraft are physically present in the sector at the same time. These are different
+		// units and cannot be directly compared.
+		//
+		// Little's Law bridges the gap:
+		//   Average Occupancy = Arrival Rate × Average Dwell Time
+		//   (aircraft present) = (aircraft/hr) × (hours each one stays)
+		//
+		// We derive average dwell time per-slot from the simulation snapshots:
+		//   For each slot, find the first and last minute it was seen in this sector.
+		//   Its dwell time = (lastMinute - firstMinute + analysisResolution).
+		//   The +resolution accounts for the fact that the aircraft was still present
+		//   during the last recorded tick, so it stayed at least one more step.
+		//
+		//   Example: slot seen at minutes 10, 12, 14 with resolution=2
+		//     → dwell = 14 - 10 + 2 = 6 minutes
+		//
+		//   We then average those individual dwell times across all slots.
+		//
+		//   estimatedMaxOccupancy = maxAcPerHour × avgDwellMinutes / 60
+		//
+		//   Example: avgDwellMinutes=12, maxAcPerHour=30
+		//     → 30 × (12/60) = 6 aircraft concurrently at capacity
+		//
+		// For unlimited sectors (65535) we skip — no meaningful capacity limit to draw.
+		// For sectors with no simulation data we also skip — nothing to derive dwell time from.
+		type slotRange struct{ min, max int }
+		perSlot := map[uint]slotRange{}
+		for _, sn := range snaps {
+			if r, ok := perSlot[sn.SlotID]; ok {
+				if sn.MinuteOffset < r.min {
+					r.min = sn.MinuteOffset
+				}
+				if sn.MinuteOffset > r.max {
+					r.max = sn.MinuteOffset
+				}
+				perSlot[sn.SlotID] = r
+			} else {
+				perSlot[sn.SlotID] = slotRange{sn.MinuteOffset, sn.MinuteOffset}
+			}
+		}
+
+		avgDwellMinutes := 0.0
+		estimatedMaxOccupancy := 0
+		estimatedTotalOccupancy := 0
+		if hasTimings && len(perSlot) > 0 {
+			totalDwell := 0
+			for _, r := range perSlot {
+				totalDwell += r.max - r.min + analysisResolution
+			}
+			avgDwellMinutes = math.Round(float64(totalDwell)/float64(len(perSlot))*10) / 10
+			if s.MaximumAircraftPerHour > 0 && s.MaximumAircraftPerHour < 65535 {
+				// Max occupancy (instantaneous): λ × W / 60
+				estimatedMaxOccupancy = int(math.Round(float64(s.MaximumAircraftPerHour) * avgDwellMinutes / 60.0))
+				// Total occupancy (unique aircraft in any 20-min window): λ × (W + 20) / 60
+				// = steady-state occupancy at window start + new arrivals during the window.
+				estimatedTotalOccupancy = int(math.Round(float64(s.MaximumAircraftPerHour) * (avgDwellMinutes + 20) / 60.0))
 			}
 		}
 
 		result = append(result, sectorEntry{
-			Identifier:   s.Identifier,
-			MaxAcPerHour: s.MaximumAircraftPerHour,
-			HasTimings:   hasTimings,
-			TotalSlots:   len(allSlotIDs),
-			Buckets:      buckets,
+			Identifier:              s.Identifier,
+			MaxAcPerHour:            s.MaximumAircraftPerHour,
+			HasTimings:              hasTimings,
+			TotalSlots:              len(perSlot),
+			AvgDwellMinutes:         avgDwellMinutes,
+			EstimatedMaxOccupancy:   estimatedMaxOccupancy,
+			EstimatedTotalOccupancy: estimatedTotalOccupancy,
+			Buckets:                 buckets,
 		})
 	}
 
