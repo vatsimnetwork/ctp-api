@@ -1,6 +1,7 @@
 package handlers
 
 import (
+	"fmt"
 	"strconv"
 	"time"
 
@@ -192,7 +193,12 @@ func ChartsSectors(c fiber.Ctx) error {
 		snapsBySector[sID] = append(snapsBySector[sID], snap{s.MinuteOffset, s.SlotID})
 	}
 
-	eventDate := event.Date.UTC()
+	syncBase := event.Date.UTC()
+	if tod := event.DepartureTimeWindowOffsetSynchronizationTimeOfDay; tod != "" {
+		var h, m int
+		fmt.Sscanf(tod, "%d:%d", &h, &m)
+		syncBase = syncBase.Add(time.Duration(h)*time.Hour + time.Duration(m)*time.Minute)
+	}
 
 	type bucketEntry struct {
 		Label string `json:"label"`
@@ -234,7 +240,7 @@ func ChartsSectors(c fiber.Ctx) error {
 				}
 			}
 			for b := minBucket; b <= maxBucket; b++ {
-				label := eventDate.Add(time.Duration(b*20) * time.Minute).UTC().Format("15:04Z")
+				label := syncBase.Add(time.Duration(b*20) * time.Minute).UTC().Format("15:04Z")
 				buckets = append(buckets, bucketEntry{Label: label, Count: len(bucketSlots[b])})
 			}
 		}
