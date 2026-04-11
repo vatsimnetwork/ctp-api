@@ -42,13 +42,20 @@ type RouteRevisionSet struct {
 }
 
 type RouteRevisionEntry struct {
-	ID             uint   `gorm:"primaryKey" json:"id"`
-	RevisionID     uint   `gorm:"index;not null" json:"revisionId"`
-	Identifier     string `gorm:"not null" json:"identifier"`
-	Group          string `json:"group"`
-	RouteString    string `json:"routeString"`
-	Facilities     string `json:"facilities"`
-	Tags           string `json:"tags"`
-	Color          string `json:"color"`
-	Enabled        bool   `gorm:"default:true" json:"enabled"`
+	ID          uint   `gorm:"primaryKey" json:"id"`
+	RevisionID  uint   `gorm:"index;not null" json:"revisionId"`
+	Identifier  string `gorm:"not null" json:"identifier"`
+	Group       string `json:"group"`
+	RouteString string `json:"routeString"`
+	Facilities  string `json:"facilities"`
+	Tags        string `json:"tags"`
+	Color       string `json:"color"`
+	Enabled     bool   `gorm:"default:true" json:"enabled"`
+}
+
+type GeoJsonOverlay struct {
+	ID        uint      `gorm:"primaryKey" json:"id"`
+	Name      string    `gorm:"not null" json:"name"`
+	URL       string    `gorm:"not null" json:"url"`
+	CreatedAt time.Time `json:"createdAt"`
 }

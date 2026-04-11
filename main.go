@@ -13,9 +13,9 @@ import (
 	"syscall"
 	"time"
 
+	swaggo "github.com/gofiber/contrib/v3/swaggo"
 	"github.com/gofiber/fiber/v3"
 	"github.com/gofiber/fiber/v3/middleware/recover"
-	swaggo "github.com/gofiber/contrib/v3/swaggo"
 	"github.com/rs/zerolog"
 	"github.com/rs/zerolog/log"
 	"github.com/vatsimnetwork/ctp-api/config"
@@ -79,8 +79,8 @@ func main() {
 	api.Get("/events/:id/simulator-data", handlers.GetSimulatorData)
 	api.Get("/events/:id/simulator-data/latest-with-slots", handlers.GetSimulatorDataLatestWithSlots)
 	api.Get("/events/:id/charts/departure-airports", handlers.ChartsDepartureAirports)
-	api.Get("/events/:id/charts/sectors",            handlers.ChartsSectors)
-	api.Get("/events/:id/charts/arrival-airports",   handlers.ChartsArrivalAirports)
+	api.Get("/events/:id/charts/sectors", handlers.ChartsSectors)
+	api.Get("/events/:id/charts/arrival-airports", handlers.ChartsArrivalAirports)
 	api.Get("/events/:id/calculate-slots/preview", handlers.PreviewCalculatePayload)
 	api.Get("/events/:id/simulate-slots/preview", handlers.PreviewSimulatePayload)
 	api.Post("/events/:id/calculate-slots", handlers.CalculateSlots)
@@ -139,6 +139,10 @@ func main() {
 	api.Get("/highlighted-waypoints", handlers.ListHighlightedWaypoints)
 	api.Post("/highlighted-waypoints", handlers.UpsertHighlightedWaypoint)
 	api.Delete("/highlighted-waypoints/:identifier", handlers.DeleteHighlightedWaypoint)
+
+	api.Get("/geo-json-overlays", handlers.ListGeoJsonOverlays)
+	api.Post("/geo-json-overlays", handlers.UpsertGeoJsonOverlay)
+	api.Delete("/geo-json-overlays/:id", handlers.DeleteGeoJsonOverlay)
 
 	api.Get("/route-revisions", handlers.ListRouteRevisions)
 	api.Post("/route-revisions", handlers.CreateRouteRevision)

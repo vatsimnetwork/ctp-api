@@ -51,6 +51,7 @@ func Connect() {
 		&models.HighlightedWaypoint{},
 		&models.RouteRevisionSet{},
 		&models.RouteRevisionEntry{},
+		&models.GeoJsonOverlay{},
 	); err != nil {
 		log.Fatal().Err(err).Msg("automigrate failed")
 	}
