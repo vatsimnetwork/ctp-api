@@ -87,7 +87,8 @@ func main() {
 	api.Post("/events/:id/simulate-slots", handlers.SimulateSlots)
 	api.Get("/events/:id/simulate-status", handlers.GetSimulateStatus)
 	api.Get("/events/:id/latest-simulator-response", handlers.GetLatestSimulatorResponse)
-	api.Get("/events/:id/slot-positions", handlers.GetSlotPositions)
+	api.Get("/events/:id/slot-positions", handlers.GetSlotPositionsAtTime)
+	api.Get("/events/:id/slot-positions/all", handlers.GetAllSlotPositions)
 
 	api.Get("/events/:eventId/airports", handlers.ListAirports)
 	api.Post("/events/:eventId/airports", handlers.CreateAirport)

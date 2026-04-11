@@ -236,11 +236,30 @@ type positionRow struct {
 }
 
 type slotPositionAtTime struct {
-	SlotID           uint    `json:"slotId"`
-	DepartureTime    string  `json:"departureTime"`
-	ArrivalTime      string  `json:"arrivalTime"`
-	DepartureAirport string  `json:"departureAirport"`
-	ArrivalAirport   string  `json:"arrivalAirport"`
-	Latitude         float64 `json:"latitude"`
-	Longitude        float64 `json:"longitude"`
+	SlotID             uint    `json:"slotId"`
+	DepartureTime      string  `json:"departureTime"`
+	ArrivalTime        string  `json:"arrivalTime"`
+	DepartureAirport   string  `json:"departureAirport"`
+	DepartureAirportID int64   `json:"departureAirportId"`
+	ArrivalAirport     string  `json:"arrivalAirport"`
+	ArrivalAirportID   int64   `json:"arrivalAirportId"`
+	Latitude           float64 `json:"latitude"`
+	Longitude          float64 `json:"longitude"`
+}
+
+type allSlotPositions struct {
+	SlotID             uint                    `json:"slotId"`
+	DepartureTime      string                  `json:"departureTime"`
+	ArrivalTime        string                  `json:"arrivalTime"`
+	DepartureAirport   string                  `json:"departureAirport"`
+	DepartureAirportID int64                   `json:"departureAirportId"`
+	ArrivalAirport     string                  `json:"arrivalAirport"`
+	ArrivalAirportID   int64                   `json:"arrivalAirportId"`
+	Positions          []slotPositionTimestamp `json:"positions"`
+}
+
+type slotPositionTimestamp struct {
+	Timestamp string  `json:"timestamp"`
+	Latitude  float64 `json:"latitude"`
+	Longitude float64 `json:"longitude"`
 }
