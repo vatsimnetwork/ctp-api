@@ -141,20 +141,21 @@ type simTagLimit struct {
 }
 
 type simEvent struct {
-	Id                    uint                     `json:"id"`
-	Title                 string                   `json:"title"`
-	RouteRevision         uint                     `json:"routeRevision"`
-	SlotRevision          uint                     `json:"slotRevision"`
-	Date                  string                   `json:"date"`
-	DepartureTimeWindow   string                   `json:"departureTimeWindow"`
-	CalculationParameters simCalculationParameters `json:"calculationParameters"`
-	Airports              []simAirport             `json:"airports"`
-	Waypoints             []simWaypoint            `json:"waypoints"`
-	RouteSegments         []simRouteSegment        `json:"routeSegments"`
-	Sectors               []simSector              `json:"sectors"`
-	TagLimits                []simTagLimit            `json:"tagLimits"`
-	Slots                    []simSlot                `json:"slots"`
-	DeferredDeparturePairIds [][]int64                `json:"deferredDeparturePairIds"`
+	Id                        uint                     `json:"id"`
+	Title                     string                   `json:"title"`
+	RouteRevision             uint                     `json:"routeRevision"`
+	SlotRevision              uint                     `json:"slotRevision"`
+	Date                      string                   `json:"date"`
+	DepartureTimeWindow       string                   `json:"departureTimeWindow"`
+	CalculationParameters     simCalculationParameters `json:"calculationParameters"`
+	Airports                  []simAirport             `json:"airports"`
+	Waypoints                 []simWaypoint            `json:"waypoints"`
+	RouteSegments             []simRouteSegment        `json:"routeSegments"`
+	Sectors                   []simSector              `json:"sectors"`
+	TagLimits                 []simTagLimit            `json:"tagLimits"`
+	Slots                     []simSlot                `json:"slots"`
+	DeferredDeparturePairIds  [][]int64                `json:"deferredDeparturePairIds"`
+	PreferredDeparturePairIds [][]int64                `json:"preferredDeparturePairIds"`
 }
 
 type simTime struct {

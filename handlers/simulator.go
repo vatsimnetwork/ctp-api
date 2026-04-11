@@ -194,12 +194,18 @@ func buildSimEvent(event models.VATSIMEvent, revision *models.SlotRevision, incl
 		dbToWaypoint[int64(a.ID)] = a.WaypointID
 	}
 
-	// Load deferred departure pairs from the database
-	var dbPairs []models.DeferredDeparturePair
-	database.DB.Where("event_id = ?", event.ID).Find(&dbPairs)
-	deferredPairs := make([][]int64, 0, len(dbPairs))
-	for _, p := range dbPairs {
-		deferredPairs = append(deferredPairs, []int64{int64(p.DepartureAirportID), int64(p.ArrivalAirportID)})
+	// Load departure pair preferences from the database
+	var dbPrefs []models.DeparturePairPreference
+	database.DB.Where("event_id = ?", event.ID).Find(&dbPrefs)
+	deferredPairs := make([][]int64, 0)
+	preferredPairs := make([][]int64, 0)
+	for _, p := range dbPrefs {
+		waypointPair := []int64{int64(p.DepartureAirportID), int64(p.ArrivalAirportID)}
+		if p.Preference == models.PreferenceDeferred {
+			deferredPairs = append(deferredPairs, waypointPair)
+		} else if p.Preference == models.PreferencePreferred {
+			preferredPairs = append(preferredPairs, waypointPair)
+		}
 	}
 
 	waypointByID := make(map[int64]simWaypoint)
@@ -325,13 +331,25 @@ func buildSimEvent(event models.VATSIMEvent, revision *models.SlotRevision, incl
 	}
 
 	// Convert deferred pairs from DB airport IDs to waypoint IDs
-	convertedPairs := make([][]int64, 0, len(deferredPairs))
+	convertedDeferredPairs := make([][]int64, 0, len(deferredPairs))
 	for _, pair := range deferredPairs {
 		if len(pair) == 2 {
 			dw, dok := dbToWaypoint[pair[0]]
 			aw, aok := dbToWaypoint[pair[1]]
 			if dok && aok {
-				convertedPairs = append(convertedPairs, []int64{dw, aw})
+				convertedDeferredPairs = append(convertedDeferredPairs, []int64{dw, aw})
+			}
+		}
+	}
+
+	// Convert preferred pairs from DB airport IDs to waypoint IDs
+	convertedPreferredPairs := make([][]int64, 0, len(preferredPairs))
+	for _, pair := range preferredPairs {
+		if len(pair) == 2 {
+			dw, dok := dbToWaypoint[pair[0]]
+			aw, aok := dbToWaypoint[pair[1]]
+			if dok && aok {
+				convertedPreferredPairs = append(convertedPreferredPairs, []int64{dw, aw})
 			}
 		}
 	}
@@ -356,13 +374,14 @@ func buildSimEvent(event models.VATSIMEvent, revision *models.SlotRevision, incl
 			CalculationFallbackGroundSpeed:                        event.CalculationFallbackGroundSpeed,
 			HighSimulationAccuracy:                                event.HighSimulationAccuracy,
 		},
-		Airports:                 airports,
-		Waypoints:                waypoints,
-		RouteSegments:            routeSegments,
-		Sectors:                  sectors,
-		TagLimits:                tagLimits,
-		Slots:                    slots,
-		DeferredDeparturePairIds: convertedPairs,
+		Airports:                  airports,
+		Waypoints:                 waypoints,
+		RouteSegments:             routeSegments,
+		Sectors:                   sectors,
+		TagLimits:                 tagLimits,
+		Slots:                     slots,
+		DeferredDeparturePairIds:  convertedDeferredPairs,
+		PreferredDeparturePairIds: convertedPreferredPairs,
 	}
 }
 

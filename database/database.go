@@ -53,7 +53,7 @@ func Connect() {
 		&models.RouteRevisionEntry{},
 		&models.GeoJsonOverlay{},
 		&models.SlotPosition{},
-		&models.DeferredDeparturePair{},
+		&models.DeparturePairPreference{},
 	); err != nil {
 		log.Fatal().Err(err).Msg("automigrate failed")
 	}

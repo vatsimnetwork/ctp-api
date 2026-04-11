@@ -8,54 +8,61 @@ import (
 	"github.com/vatsimnetwork/ctp-api/models"
 )
 
-func ListDeferredDeparturePairs(c fiber.Ctx) error {
+func ListDeparturePairPreferences(c fiber.Ctx) error {
 	eventID, err := strconv.ParseUint(c.Params("eventId"), 10, 64)
 	if err != nil {
 		return fiber.NewError(fiber.StatusBadRequest, "invalid event id")
 	}
 
-	var pairs []models.DeferredDeparturePair
-	if err := database.DB.Where("event_id = ?", eventID).Find(&pairs).Error; err != nil {
+	var prefs []models.DeparturePairPreference
+	if err := database.DB.Where("event_id = ?", eventID).Find(&prefs).Error; err != nil {
 		return fiber.NewError(fiber.StatusInternalServerError, err.Error())
 	}
 
-	result := make([][]uint, 0, len(pairs))
-	for _, p := range pairs {
-		result = append(result, []uint{p.DepartureAirportID, p.ArrivalAirportID})
+	result := make([][]interface{}, 0, len(prefs))
+	for _, p := range prefs {
+		result = append(result, []interface{}{p.DepartureAirportID, p.ArrivalAirportID, p.Preference})
 	}
 	return c.JSON(result)
 }
 
-// SetDeferredDeparturePairs replaces all deferred pairs for the event.
-// Input: [[departureAirportId, arrivalAirportId], ...]
-func SetDeferredDeparturePairs(c fiber.Ctx) error {
+func SetDeparturePairPreferences(c fiber.Ctx) error {
 	eventID, err := strconv.ParseUint(c.Params("eventId"), 10, 64)
 	if err != nil {
 		return fiber.NewError(fiber.StatusBadRequest, "invalid event id")
 	}
 
-	var input [][]uint
+	var input [][]interface{}
 	if err := c.Bind().JSON(&input); err != nil {
 		return fiber.NewError(fiber.StatusBadRequest, err.Error())
 	}
 
 	tx := database.DB.Begin()
 
-	// Delete existing pairs for this event
-	if err := tx.Where("event_id = ?", eventID).Delete(&models.DeferredDeparturePair{}).Error; err != nil {
+	if err := tx.Where("event_id = ?", eventID).Delete(&models.DeparturePairPreference{}).Error; err != nil {
 		tx.Rollback()
 		return fiber.NewError(fiber.StatusInternalServerError, err.Error())
 	}
 
-	// Insert new pairs
-	for _, pair := range input {
-		if len(pair) != 2 {
+	for _, item := range input {
+		if len(item) != 3 {
 			continue
 		}
-		p := models.DeferredDeparturePair{
+		depID, ok1 := item[0].(float64)
+		arrID, ok2 := item[1].(float64)
+		pref, ok3 := item[2].(float64)
+		if !ok1 || !ok2 || !ok3 {
+			continue
+		}
+		prefUint8 := uint8(pref)
+		if prefUint8 == models.PreferenceNone {
+			continue
+		}
+		p := models.DeparturePairPreference{
 			EventID:            uint(eventID),
-			DepartureAirportID: pair[0],
-			ArrivalAirportID:   pair[1],
+			DepartureAirportID: uint(depID),
+			ArrivalAirportID:   uint(arrID),
+			Preference:         prefUint8,
 		}
 		if err := tx.Create(&p).Error; err != nil {
 			tx.Rollback()
