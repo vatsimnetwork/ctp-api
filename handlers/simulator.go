@@ -14,6 +14,7 @@ import (
 	"time"
 
 	"github.com/gofiber/fiber/v3"
+	"github.com/jackc/pgx/v5"
 	"github.com/rs/zerolog/log"
 	"github.com/vatsimnetwork/ctp-api/config"
 	"github.com/vatsimnetwork/ctp-api/database"
@@ -617,6 +618,17 @@ func writeThroughputStates(tx *gorm.DB, revisionID uint, resp simResponseEvent, 
 	return tx.CreateInBatches(rows, 500).Error
 }
 
+// snapshotRow holds the raw column values for a single COPY row, avoiding
+// the need to materialise a full models.ThroughputSnapshot (with its Slot
+// relation) for every record.
+type snapshotRow struct {
+	revisionID uint
+	pointType  string
+	pointID    int64
+	minute     int
+	slotID     uint
+}
+
 func writeThroughputSnapshots(tx *gorm.DB, revisionID uint, resp simResponseEvent, airportByWaypoint map[int64]uint) error {
 	// Pre-calculate total capacity to avoid reallocations
 	total := 0
@@ -641,67 +653,74 @@ func writeThroughputSnapshots(tx *gorm.DB, revisionID uint, resp simResponseEven
 		}
 	}
 
-	rows := make([]models.ThroughputSnapshot, 0, total)
+	if total == 0 {
+		return nil
+	}
+
+	rows := make([]snapshotRow, 0, total)
 
 	for _, a := range resp.Airports {
 		pid := int64(airportByWaypoint[a.Id])
 		for minuteOffset, slotIDs := range a.SlotsFrames {
 			for _, slotID := range slotIDs {
-				rows = append(rows, models.ThroughputSnapshot{
-					SlotRevisionID:      revisionID,
-					ThroughputPointType: "airport",
-					ThroughputPointID:   pid,
-					MinuteOffset:        minuteOffset,
-					SlotID:              slotID,
-				})
+				rows = append(rows, snapshotRow{revisionID, "airport", pid, minuteOffset, slotID})
 			}
 		}
 	}
 	for _, w := range resp.Waypoints {
 		for minuteOffset, slotIDs := range w.SlotsFrames {
 			for _, slotID := range slotIDs {
-				rows = append(rows, models.ThroughputSnapshot{
-					SlotRevisionID:      revisionID,
-					ThroughputPointType: "waypoint",
-					ThroughputPointID:   w.Id,
-					MinuteOffset:        minuteOffset,
-					SlotID:              slotID,
-				})
+				rows = append(rows, snapshotRow{revisionID, "waypoint", w.Id, minuteOffset, slotID})
 			}
 		}
 	}
 	for _, r := range resp.RouteSegments {
 		for minuteOffset, slotIDs := range r.SlotsFrames {
 			for _, slotID := range slotIDs {
-				rows = append(rows, models.ThroughputSnapshot{
-					SlotRevisionID:      revisionID,
-					ThroughputPointType: "route_segment",
-					ThroughputPointID:   r.Id,
-					MinuteOffset:        minuteOffset,
-					SlotID:              slotID,
-				})
+				rows = append(rows, snapshotRow{revisionID, "route_segment", r.Id, minuteOffset, slotID})
 			}
 		}
 	}
 	for _, s := range resp.Sectors {
 		for minuteOffset, slotIDs := range s.SlotsFrames {
 			for _, slotID := range slotIDs {
-				rows = append(rows, models.ThroughputSnapshot{
-					SlotRevisionID:      revisionID,
-					ThroughputPointType: "sector",
-					ThroughputPointID:   s.Id,
-					MinuteOffset:        minuteOffset,
-					SlotID:              slotID,
-				})
+				rows = append(rows, snapshotRow{revisionID, "sector", s.Id, minuteOffset, slotID})
 			}
 		}
 	}
 
-	if len(rows) == 0 {
-		return nil
+	log.Info().Int("snapshotRows", len(rows)).Msg("[writeThroughputSnapshots] COPY inserting")
+
+	// Extract the raw *sql.DB from GORM, then grab a pgx conn for COPY.
+	sqlDB, err := tx.DB()
+	if err != nil {
+		return fmt.Errorf("get underlying sql.DB: %w", err)
 	}
-	log.Info().Int("snapshotRows", len(rows)).Msg("[writeThroughputSnapshots] batch inserting")
-	return tx.CreateInBatches(rows, 1000).Error
+	conn, err := sqlDB.Conn(context.Background())
+	if err != nil {
+		return fmt.Errorf("acquire sql.Conn: %w", err)
+	}
+	defer conn.Close()
+
+	return conn.Raw(func(driverConn any) error {
+		// The gorm postgres driver wraps pgx/v5/stdlib whose Conn type
+		// exposes the underlying *pgx.Conn via a Conn() method.
+		type pgxConner interface {
+			Conn() *pgx.Conn
+		}
+		pgxConn := driverConn.(pgxConner).Conn()
+
+		_, copyErr := pgxConn.CopyFrom(
+			context.Background(),
+			pgx.Identifier{"throughput_snapshots"},
+			[]string{"slot_revision_id", "throughput_point_type", "throughput_point_id", "minute_offset", "slot_id"},
+			pgx.CopyFromSlice(len(rows), func(i int) ([]any, error) {
+				r := &rows[i]
+				return []any{r.revisionID, r.pointType, r.pointID, r.minute, r.slotID}, nil
+			}),
+		)
+		return copyErr
+	})
 }
 
 func saveCalculationResult(eventID uint, resp simResponseEvent, commentary string) (uint, uint, error) {
