@@ -8,11 +8,6 @@ import (
 	"github.com/vatsimnetwork/ctp-api/models"
 )
 
-type tagLimitResponse struct {
-	Tag                    string `json:"tag"`
-	MaximumAircraftPerHour uint16 `json:"maximumAircraftPerHour"`
-}
-
 func ListEventTagLimits(c fiber.Ctx) error {
 	eventID, err := strconv.ParseUint(c.Params("eventId"), 10, 64)
 	if err != nil {

@@ -10,16 +10,6 @@ import (
 	"gorm.io/gorm/clause"
 )
 
-type airportInput struct {
-	WaypointID             int64   `json:"waypointId"`
-	Identifier             string  `json:"identifier"`
-	Latitude               float64 `json:"latitude"`
-	Longitude              float64 `json:"longitude"`
-	MaximumAircraftPerHour uint16  `json:"maximumAircraftPerHour"`
-	MaximumSlots           uint16  `json:"maximumSlots"`
-	NumberOfVotes          uint16  `json:"numberOfVotes"`
-}
-
 // ListAirports godoc
 //
 //	@Summary	List airports for an event

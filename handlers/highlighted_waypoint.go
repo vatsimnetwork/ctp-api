@@ -7,15 +7,6 @@ import (
 	"gorm.io/gorm/clause"
 )
 
-type highlightedWaypointInput struct {
-	Identifier string  `json:"identifier"`
-	Color      string  `json:"color"`
-	Note       string  `json:"note"`
-	WaypointID *int64  `json:"waypointId"`
-	Latitude   float64 `json:"latitude"`
-	Longitude  float64 `json:"longitude"`
-}
-
 // ListHighlightedWaypoints godoc
 //
 //	@Summary	List all highlighted waypoints

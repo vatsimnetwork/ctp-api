@@ -11,34 +11,6 @@ import (
 	"gorm.io/gorm/clause"
 )
 
-type locationInput struct {
-	Identifier string  `json:"identifier"`
-	Latitude   float64 `json:"latitude"`
-	Longitude  float64 `json:"longitude"`
-	WaypointID int64   `json:"waypointId"`
-	SortOrder  uint    `json:"sortOrder"`
-}
-
-type tagInput struct {
-	Tag string `json:"tag"`
-}
-
-type routeSegmentInput struct {
-	ID                          uint            `json:"id"`
-	Identifier                  string          `json:"identifier"`
-	MaximumAircraftPerHour      *uint16         `json:"maximumAircraftPerHour,omitempty"`
-	RouteString                 string          `json:"routeString"`
-	RouteSegmentGroup           string          `json:"routeSegmentGroup"`
-	Color                       string          `json:"color"`
-	Enabled                     bool            `json:"enabled"`
-	Facilities                  string          `json:"facilities"`
-	Tags                        []tagInput      `json:"tags"`
-	ProvidedFacilityProgression []models.Sector `json:"providedFacilityProgression"`
-	Locations                   []locationInput `json:"locations"`
-	RouteRevision               uint            `json:"routeRevision"`
-	EventID                     *uint           `json:"eventId,omitempty"`
-}
-
 // ListAllRouteSegments godoc
 //
 //	@Summary	List all route segments
