@@ -881,27 +881,26 @@ func saveSimulationResult(eventID uint, resp simResponseEvent, commentary string
 		airportByWaypoint := airportWaypointLookup(database.DB, eid)
 
 		t = time.Now()
-		if err := writeThroughputStates(database.DB, rid, simResp, airportByWaypoint); err != nil {
-			log.Error().Err(err).Msg("[saveSimulation] background writeThroughputStates failed")
-		}
-		log.Info().Dur("elapsed", time.Since(t)).Msg("[saveSimulation] writeThroughputStates done")
-
-		t = time.Now()
+		writeThroughputStates(database.DB, rid, simResp, airportByWaypoint)
 		updateAirportDepartureTimeWindows(database.DB, simResp, airportByWaypoint)
 		updateAirportEarliestArrivals(database.DB, simResp, airportByWaypoint)
-		log.Info().Dur("elapsed", time.Since(t)).Msg("[saveSimulation] airport time windows done")
+		log.Info().Dur("elapsed", time.Since(t)).Msg("[saveSimulation] writeThroughputStates + airport time windows done")
 
-		t = time.Now()
-		if err := writeThroughputSnapshots(database.DB, rid, simResp, airportByWaypoint); err != nil {
-			log.Error().Err(err).Msg("[saveSimulation] background writeThroughputSnapshots failed")
-		}
-		log.Info().Dur("elapsed", time.Since(t)).Msg("[saveSimulation] writeThroughputSnapshots done")
-
-		t = time.Now()
-		if err := writeSlotPositions(database.DB, simResp); err != nil {
-			log.Error().Err(err).Msg("[saveSimulation] background writeSlotPositions failed")
-		}
-		log.Info().Dur("elapsed", time.Since(t)).Msg("[saveSimulation] writeSlotPositions done")
+		var wg sync.WaitGroup
+		wg.Add(2)
+		go func() {
+			defer wg.Done()
+			t := time.Now()
+			writeThroughputSnapshots(database.DB, rid, simResp, airportByWaypoint)
+			log.Info().Dur("elapsed", time.Since(t)).Msg("[saveSimulation] writeThroughputSnapshots done")
+		}()
+		go func() {
+			defer wg.Done()
+			t := time.Now()
+			writeSlotPositions(database.DB, simResp)
+			log.Info().Dur("elapsed", time.Since(t)).Msg("[saveSimulation] writeSlotPositions done")
+		}()
+		wg.Wait()
 
 		log.Info().Uint("revisionId", rid).Dur("totalElapsed", time.Since(bgStart)).Msg("[saveSimulation] background throughput write complete")
 		simStatusStore.Delete(uint64(eid))
