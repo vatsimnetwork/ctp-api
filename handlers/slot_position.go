@@ -46,8 +46,10 @@ func GetSlotPositions(c fiber.Ctx) error {
 	var revision models.SlotRevision
 	if err := database.DB.
 		Preload("Slots").
-		Preload("Slots.DepartureAirport").
-		Preload("Slots.ArrivalAirport").
+		Preload("Slots.DepartureAirport", "id IS NOT NULL").
+		Preload("Slots.DepartureAirport.Waypoint").
+		Preload("Slots.ArrivalAirport", "id IS NOT NULL").
+		Preload("Slots.ArrivalAirport.Waypoint").
 		Where("event_id = ? AND EXISTS (SELECT 1 FROM slots WHERE slot_revision_id = slot_revisions.id)", eventID).
 		Order("number DESC").
 		First(&revision).Error; err != nil {
