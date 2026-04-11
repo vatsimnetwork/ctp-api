@@ -152,8 +152,9 @@ type simEvent struct {
 	Waypoints             []simWaypoint            `json:"waypoints"`
 	RouteSegments         []simRouteSegment        `json:"routeSegments"`
 	Sectors               []simSector              `json:"sectors"`
-	TagLimits             []simTagLimit            `json:"tagLimits"`
-	Slots                 []simSlot                `json:"slots"`
+	TagLimits                []simTagLimit            `json:"tagLimits"`
+	Slots                    []simSlot                `json:"slots"`
+	DeferredDeparturePairIds [][]int64                `json:"deferredDeparturePairIds"`
 }
 
 type simTime struct {

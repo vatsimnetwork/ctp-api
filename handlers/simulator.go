@@ -186,9 +186,20 @@ func buildSimEvent(event models.VATSIMEvent, revision *models.SlotRevision, incl
 
 	airports := make([]simAirport, 0, len(event.Airports))
 	airportWaypointIDs := make(map[int64]bool, len(event.Airports))
+	// Map DB airport ID -> waypoint ID for deferred pair conversion
+	dbToWaypoint := make(map[int64]int64, len(event.Airports))
 	for _, a := range event.Airports {
 		airports = append(airports, mapAirport(a))
 		airportWaypointIDs[a.WaypointID] = true
+		dbToWaypoint[int64(a.ID)] = a.WaypointID
+	}
+
+	// Load deferred departure pairs from the database
+	var dbPairs []models.DeferredDeparturePair
+	database.DB.Where("event_id = ?", event.ID).Find(&dbPairs)
+	deferredPairs := make([][]int64, 0, len(dbPairs))
+	for _, p := range dbPairs {
+		deferredPairs = append(deferredPairs, []int64{int64(p.DepartureAirportID), int64(p.ArrivalAirportID)})
 	}
 
 	waypointByID := make(map[int64]simWaypoint)
@@ -313,6 +324,18 @@ func buildSimEvent(event models.VATSIMEvent, revision *models.SlotRevision, incl
 		}
 	}
 
+	// Convert deferred pairs from DB airport IDs to waypoint IDs
+	convertedPairs := make([][]int64, 0, len(deferredPairs))
+	for _, pair := range deferredPairs {
+		if len(pair) == 2 {
+			dw, dok := dbToWaypoint[pair[0]]
+			aw, aok := dbToWaypoint[pair[1]]
+			if dok && aok {
+				convertedPairs = append(convertedPairs, []int64{dw, aw})
+			}
+		}
+	}
+
 	return simEvent{
 		Id:                  event.ID,
 		Title:               event.Title,
@@ -333,12 +356,13 @@ func buildSimEvent(event models.VATSIMEvent, revision *models.SlotRevision, incl
 			CalculationFallbackGroundSpeed:                        event.CalculationFallbackGroundSpeed,
 			HighSimulationAccuracy:                                event.HighSimulationAccuracy,
 		},
-		Airports:      airports,
-		Waypoints:     waypoints,
-		RouteSegments: routeSegments,
-		Sectors:       sectors,
-		TagLimits:     tagLimits,
-		Slots:         slots,
+		Airports:                 airports,
+		Waypoints:                waypoints,
+		RouteSegments:            routeSegments,
+		Sectors:                  sectors,
+		TagLimits:                tagLimits,
+		Slots:                    slots,
+		DeferredDeparturePairIds: convertedPairs,
 	}
 }
 

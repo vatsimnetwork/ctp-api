@@ -90,6 +90,9 @@ func main() {
 	api.Get("/events/:id/slot-positions", handlers.GetSlotPositionsAtTime)
 	api.Get("/events/:id/slot-positions/all", handlers.GetAllSlotPositions)
 
+	api.Get("/events/:eventId/deferred-departure-pairs", handlers.ListDeferredDeparturePairs)
+	api.Put("/events/:eventId/deferred-departure-pairs", handlers.SetDeferredDeparturePairs)
+
 	api.Get("/events/:eventId/airports", handlers.ListAirports)
 	api.Post("/events/:eventId/airports", handlers.CreateAirport)
 	api.Put("/airports/:id", handlers.UpdateAirport)
