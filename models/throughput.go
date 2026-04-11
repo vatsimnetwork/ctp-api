@@ -21,9 +21,9 @@ type ThroughputState struct {
 type ThroughputSnapshot struct {
 	ID                  uint   `gorm:"primaryKey" json:"id"`
 	SlotRevisionID      uint   `gorm:"index;not null" json:"slotRevisionId"`
-	ThroughputPointType string `gorm:"not null;index" json:"throughputPointType"`
-	ThroughputPointID   int64  `gorm:"not null;index" json:"throughputPointId"`
-	MinuteOffset        int    `gorm:"not null;index" json:"minuteOffset"`
-	SlotID              uint   `gorm:"not null;index" json:"slotId"`
+	ThroughputPointType string `gorm:"not null" json:"throughputPointType"`
+	ThroughputPointID   int64  `gorm:"not null" json:"throughputPointId"`
+	MinuteOffset        int    `gorm:"not null" json:"minuteOffset"`
+	SlotID              uint   `gorm:"not null" json:"slotId"`
 	Slot                Slot   `gorm:"foreignKey:SlotID" json:"slot,omitempty"`
 }

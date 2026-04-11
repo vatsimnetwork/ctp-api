@@ -58,7 +58,6 @@ func GetLatestSimulatorResponse(c fiber.Ctx) error {
 	return c.Send(raw.([]byte))
 }
 
-
 func mapAirport(a models.Airport) simAirport {
 	var dtws *string
 	if a.DepartureTimeWindowStart != nil {
@@ -472,6 +471,16 @@ func writeThroughputStates(tx *gorm.DB, revisionID uint, resp simResponseEvent, 
 	return tx.CreateInBatches(rows, 500).Error
 }
 
+var snapshotPreCopyDDL = []string{
+	`DROP INDEX IF EXISTS idx_throughput_snapshots_slot_revision_id`,
+	`ALTER TABLE throughput_snapshots DROP CONSTRAINT IF EXISTS fk_throughput_snapshots_slot`,
+}
+
+var snapshotPostCopyDDL = []string{
+	`CREATE INDEX idx_throughput_snapshots_slot_revision_id ON throughput_snapshots (slot_revision_id)`,
+	`ALTER TABLE throughput_snapshots ADD CONSTRAINT fk_throughput_snapshots_slot FOREIGN KEY (slot_id) REFERENCES slots(id)`,
+}
+
 func writeThroughputSnapshots(tx *gorm.DB, revisionID uint, resp simResponseEvent, airportByWaypoint map[int64]uint) error {
 	// Pre-calculate total capacity to avoid reallocations
 	total := 0
@@ -552,9 +561,18 @@ func writeThroughputSnapshots(tx *gorm.DB, revisionID uint, resp simResponseEven
 			Conn() *pgx.Conn
 		}
 		pgxConn := driverConn.(pgxConner).Conn()
+		ctx := context.Background()
+
+		// Drop indexes/FK before bulk load — rebuilding once after is far
+		// cheaper than maintaining B-trees per-row during COPY.
+		for _, ddl := range snapshotPreCopyDDL {
+			if _, execErr := pgxConn.Exec(ctx, ddl); execErr != nil {
+				log.Warn().Err(execErr).Str("ddl", ddl).Msg("[writeThroughputSnapshots] pre-copy DDL warning")
+			}
+		}
 
 		_, copyErr := pgxConn.CopyFrom(
-			context.Background(),
+			ctx,
 			pgx.Identifier{"throughput_snapshots"},
 			[]string{"slot_revision_id", "throughput_point_type", "throughput_point_id", "minute_offset", "slot_id"},
 			pgx.CopyFromSlice(len(rows), func(i int) ([]any, error) {
@@ -562,6 +580,14 @@ func writeThroughputSnapshots(tx *gorm.DB, revisionID uint, resp simResponseEven
 				return []any{r.revisionID, r.pointType, r.pointID, r.minute, r.slotID}, nil
 			}),
 		)
+
+		// Recreate only the slot_revision_id index (the only one read queries use).
+		for _, ddl := range snapshotPostCopyDDL {
+			if _, execErr := pgxConn.Exec(ctx, ddl); execErr != nil {
+				log.Error().Err(execErr).Str("ddl", ddl).Msg("[writeThroughputSnapshots] post-copy DDL failed")
+			}
+		}
+
 		return copyErr
 	})
 }
