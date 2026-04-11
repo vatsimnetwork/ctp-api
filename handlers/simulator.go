@@ -478,7 +478,7 @@ var snapshotPreCopyDDL = []string{
 
 var snapshotPostCopyDDL = []string{
 	`CREATE INDEX idx_throughput_snapshots_slot_revision_id ON throughput_snapshots (slot_revision_id)`,
-	`ALTER TABLE throughput_snapshots ADD CONSTRAINT fk_throughput_snapshots_slot FOREIGN KEY (slot_id) REFERENCES slots(id)`,
+	`ALTER TABLE throughput_snapshots ADD CONSTRAINT fk_throughput_snapshots_slot FOREIGN KEY (slot_id) REFERENCES slots(id) NOT VALID`,
 }
 
 func writeThroughputSnapshots(tx *gorm.DB, revisionID uint, resp simResponseEvent, airportByWaypoint map[int64]uint) error {
@@ -761,8 +761,10 @@ func saveSimulationResult(eventID uint, resp simResponseEvent, commentary string
 	// resp is captured by value; revisionID/eventID are primitives — safe for goroutine.
 	go func(rid uint, eid uint, simResp simResponseEvent) {
 		log.Info().Uint("revisionId", rid).Uint("eventId", eid).Msg("[saveSimulation] background throughput write starting")
+		bgStart := time.Now()
 
 		// Drop all throughput data for every revision of this event except the current one.
+		t := time.Now()
 		database.DB.Exec(
 			"DELETE FROM throughput_snapshots WHERE slot_revision_id IN (SELECT id FROM slot_revisions WHERE event_id = ? AND id != ?)",
 			eid, rid,
@@ -774,19 +776,28 @@ func saveSimulationResult(eventID uint, resp simResponseEvent, commentary string
 		// Also replace any existing data for the current revision (handles re-runs).
 		database.DB.Where("slot_revision_id = ?", rid).Delete(&models.ThroughputSnapshot{})
 		database.DB.Where("slot_revision_id = ?", rid).Delete(&models.ThroughputState{})
+		log.Info().Dur("elapsed", time.Since(t)).Msg("[saveSimulation] old data purged")
 
 		airportByWaypoint := airportWaypointLookup(database.DB, eid)
 
+		t = time.Now()
 		if err := writeThroughputStates(database.DB, rid, simResp, airportByWaypoint); err != nil {
 			log.Error().Err(err).Msg("[saveSimulation] background writeThroughputStates failed")
 		}
+		log.Info().Dur("elapsed", time.Since(t)).Msg("[saveSimulation] writeThroughputStates done")
+
+		t = time.Now()
 		updateAirportDepartureTimeWindows(database.DB, simResp, airportByWaypoint)
 		updateAirportEarliestArrivals(database.DB, simResp, airportByWaypoint)
+		log.Info().Dur("elapsed", time.Since(t)).Msg("[saveSimulation] airport time windows done")
+
+		t = time.Now()
 		if err := writeThroughputSnapshots(database.DB, rid, simResp, airportByWaypoint); err != nil {
 			log.Error().Err(err).Msg("[saveSimulation] background writeThroughputSnapshots failed")
 		}
+		log.Info().Dur("elapsed", time.Since(t)).Msg("[saveSimulation] writeThroughputSnapshots done")
 
-		log.Info().Uint("revisionId", rid).Msg("[saveSimulation] background throughput write complete")
+		log.Info().Uint("revisionId", rid).Dur("totalElapsed", time.Since(bgStart)).Msg("[saveSimulation] background throughput write complete")
 		simStatusStore.Delete(uint64(eid))
 	}(revisionID, eventID, resp)
 
