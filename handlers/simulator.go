@@ -31,7 +31,16 @@ var simStatusStore sync.Map
 // simLatestResponseStore maps eventID (uint64) → raw JSON bytes of the last simulator response.
 var simLatestResponseStore sync.Map
 
-// GetSimulateStatus returns the current simulation status for an event.
+// GetSimulateStatus godoc
+//
+//	@Summary	Get current simulation status for an event
+//	@Tags		simulator
+//	@Security	ApiKeyAuth
+//	@Produce	json
+//	@Param		id	path		int	true	"Event ID"
+//	@Success	200	{object}	object	"{ status: string }"
+//	@Failure	400	{object}	models.ErrorResponse
+//	@Router		/events/{id}/simulate-status [get]
 func GetSimulateStatus(c fiber.Ctx) error {
 	id, err := strconv.ParseUint(c.Params("id"), 10, 64)
 	if err != nil {
@@ -43,8 +52,17 @@ func GetSimulateStatus(c fiber.Ctx) error {
 	return c.JSON(fiber.Map{"status": "idle"})
 }
 
-// GetLatestSimulatorResponse returns the raw JSON body of the most recent simulator
-// response for an event, exactly as received (1:1, no re-encoding).
+// GetLatestSimulatorResponse godoc
+//
+//	@Summary	Get the raw JSON body of the most recent simulator response for an event
+//	@Tags		simulator
+//	@Security	ApiKeyAuth
+//	@Produce	json
+//	@Param		id	path		int	true	"Event ID"
+//	@Success	200	{object}	any
+//	@Failure	400	{object}	models.ErrorResponse
+//	@Failure	404	{object}	models.ErrorResponse
+//	@Router		/events/{id}/latest-simulator-response [get]
 func GetLatestSimulatorResponse(c fiber.Ctx) error {
 	id, err := strconv.ParseUint(c.Params("id"), 10, 64)
 	if err != nil {
@@ -481,6 +499,16 @@ var snapshotPostCopyDDL = []string{
 	`ALTER TABLE throughput_snapshots ADD CONSTRAINT fk_throughput_snapshots_slot FOREIGN KEY (slot_id) REFERENCES slots(id) NOT VALID`,
 }
 
+var slotPositionPreCopyDDL = []string{
+	`DROP INDEX IF EXISTS idx_slot_positions_slot_id`,
+	`DROP INDEX IF EXISTS idx_slot_positions_timestamp`,
+}
+
+var slotPositionPostCopyDDL = []string{
+	`CREATE INDEX idx_slot_positions_slot_id ON slot_positions (slot_id)`,
+	`CREATE INDEX idx_slot_positions_timestamp ON slot_positions (timestamp)`,
+}
+
 func writeThroughputSnapshots(tx *gorm.DB, revisionID uint, resp simResponseEvent, airportByWaypoint map[int64]uint) error {
 	// Pre-calculate total capacity to avoid reallocations
 	total := 0
@@ -585,6 +613,77 @@ func writeThroughputSnapshots(tx *gorm.DB, revisionID uint, resp simResponseEven
 		for _, ddl := range snapshotPostCopyDDL {
 			if _, execErr := pgxConn.Exec(ctx, ddl); execErr != nil {
 				log.Error().Err(execErr).Str("ddl", ddl).Msg("[writeThroughputSnapshots] post-copy DDL failed")
+			}
+		}
+
+		return copyErr
+	})
+}
+
+func writeSlotPositions(tx *gorm.DB, resp simResponseEvent) error {
+	var rows []positionRow
+	for _, s := range resp.Slots {
+		if s.Id == 0 || len(s.SimulatedPositions) == 0 {
+			continue
+		}
+		for tsStr, coords := range s.SimulatedPositions {
+			ts, err := time.Parse(time.RFC3339, tsStr)
+			if err != nil {
+				continue
+			}
+			if len(coords) < 2 {
+				continue
+			}
+			rows = append(rows, positionRow{
+				slotID:    s.Id,
+				timestamp: ts,
+				latitude:  coords[0],
+				longitude: coords[1],
+			})
+		}
+	}
+	if len(rows) == 0 {
+		return nil
+	}
+
+	log.Info().Int("positionRows", len(rows)).Msg("[writeSlotPositions] COPY inserting")
+
+	sqlDB, err := tx.DB()
+	if err != nil {
+		return fmt.Errorf("get underlying sql.DB: %w", err)
+	}
+	conn, err := sqlDB.Conn(context.Background())
+	if err != nil {
+		return fmt.Errorf("acquire sql.Conn: %w", err)
+	}
+	defer conn.Close()
+
+	return conn.Raw(func(driverConn any) error {
+		type pgxConner interface {
+			Conn() *pgx.Conn
+		}
+		pgxConn := driverConn.(pgxConner).Conn()
+		ctx := context.Background()
+
+		for _, ddl := range slotPositionPreCopyDDL {
+			if _, execErr := pgxConn.Exec(ctx, ddl); execErr != nil {
+				log.Warn().Err(execErr).Str("ddl", ddl).Msg("[writeSlotPositions] pre-copy DDL warning")
+			}
+		}
+
+		_, copyErr := pgxConn.CopyFrom(
+			ctx,
+			pgx.Identifier{"slot_positions"},
+			[]string{"slot_id", "timestamp", "latitude", "longitude"},
+			pgx.CopyFromSlice(len(rows), func(i int) ([]any, error) {
+				r := &rows[i]
+				return []any{r.slotID, r.timestamp, r.latitude, r.longitude}, nil
+			}),
+		)
+
+		for _, ddl := range slotPositionPostCopyDDL {
+			if _, execErr := pgxConn.Exec(ctx, ddl); execErr != nil {
+				log.Error().Err(execErr).Str("ddl", ddl).Msg("[writeSlotPositions] post-copy DDL failed")
 			}
 		}
 
@@ -776,6 +875,7 @@ func saveSimulationResult(eventID uint, resp simResponseEvent, commentary string
 		// Also replace any existing data for the current revision (handles re-runs).
 		database.DB.Where("slot_revision_id = ?", rid).Delete(&models.ThroughputSnapshot{})
 		database.DB.Where("slot_revision_id = ?", rid).Delete(&models.ThroughputState{})
+		database.DB.Exec("DELETE FROM slot_positions WHERE slot_id IN (SELECT id FROM slots WHERE slot_revision_id = ?)", rid)
 		log.Info().Dur("elapsed", time.Since(t)).Msg("[saveSimulation] old data purged")
 
 		airportByWaypoint := airportWaypointLookup(database.DB, eid)
@@ -796,6 +896,12 @@ func saveSimulationResult(eventID uint, resp simResponseEvent, commentary string
 			log.Error().Err(err).Msg("[saveSimulation] background writeThroughputSnapshots failed")
 		}
 		log.Info().Dur("elapsed", time.Since(t)).Msg("[saveSimulation] writeThroughputSnapshots done")
+
+		t = time.Now()
+		if err := writeSlotPositions(database.DB, simResp); err != nil {
+			log.Error().Err(err).Msg("[saveSimulation] background writeSlotPositions failed")
+		}
+		log.Info().Dur("elapsed", time.Since(t)).Msg("[saveSimulation] writeSlotPositions done")
 
 		log.Info().Uint("revisionId", rid).Dur("totalElapsed", time.Since(bgStart)).Msg("[saveSimulation] background throughput write complete")
 		simStatusStore.Delete(uint64(eid))

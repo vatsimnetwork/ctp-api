@@ -152,7 +152,7 @@ type simEvent struct {
 	Waypoints             []simWaypoint            `json:"waypoints"`
 	RouteSegments         []simRouteSegment        `json:"routeSegments"`
 	Sectors               []simSector              `json:"sectors"`
-	TagLimits             []simTagLimit             `json:"tagLimits"`
+	TagLimits             []simTagLimit            `json:"tagLimits"`
 	Slots                 []simSlot                `json:"slots"`
 }
 
@@ -195,12 +195,13 @@ type simResponseAirport struct {
 }
 
 type simResponseSlot struct {
-	Id                   uint    `json:"id"`
-	DepartureTime        simTime `json:"departureTime"`
-	ProjectedArrivalTime simTime `json:"projectedArrivalTime"`
-	DepartureAirport     int64   `json:"departureAirportId"`
-	ArrivalAirport       int64   `json:"arrivalAirportId"`
-	RouteSegments        []uint  `json:"routeSegmentIds"`
+	Id                   uint                 `json:"id"`
+	DepartureTime        simTime              `json:"departureTime"`
+	ProjectedArrivalTime simTime              `json:"projectedArrivalTime"`
+	DepartureAirport     int64                `json:"departureAirportId"`
+	ArrivalAirport       int64                `json:"arrivalAirportId"`
+	RouteSegments        []uint               `json:"routeSegmentIds"`
+	SimulatedPositions   map[string][]float64 `json:"simulatedPositions,omitempty"`
 }
 
 type simResponseCalcParams struct {
@@ -225,4 +226,21 @@ type snapshotRow struct {
 	pointID    int64
 	minute     int
 	slotID     uint
+}
+
+type positionRow struct {
+	slotID    uint
+	timestamp time.Time
+	latitude  float64
+	longitude float64
+}
+
+type slotPositionAtTime struct {
+	SlotID           uint    `json:"slotId"`
+	DepartureTime    string  `json:"departureTime"`
+	ArrivalTime      string  `json:"arrivalTime"`
+	DepartureAirport string  `json:"departureAirport"`
+	ArrivalAirport   string  `json:"arrivalAirport"`
+	Latitude         float64 `json:"latitude"`
+	Longitude        float64 `json:"longitude"`
 }

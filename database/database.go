@@ -52,6 +52,7 @@ func Connect() {
 		&models.RouteRevisionSet{},
 		&models.RouteRevisionEntry{},
 		&models.GeoJsonOverlay{},
+		&models.SlotPosition{},
 	); err != nil {
 		log.Fatal().Err(err).Msg("automigrate failed")
 	}
