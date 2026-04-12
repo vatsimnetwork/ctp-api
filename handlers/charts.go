@@ -207,14 +207,14 @@ func ChartsSectors(c fiber.Ctx) error {
 		UniqueCount int    `json:"uniqueCount"`
 	}
 	type sectorEntry struct {
-		Identifier             string        `json:"identifier"`
-		MaxAcPerHour           uint16        `json:"maxAcPerHour"`
-		HasTimings             bool          `json:"hasTimings"`
-		TotalSlots             int           `json:"totalSlots"`
-		AvgDwellMinutes        float64       `json:"avgDwellMinutes"`
-		EstimatedMaxOccupancy  int           `json:"estimatedMaxOccupancy"`
-		EstimatedTotalOccupancy int          `json:"estimatedTotalOccupancy"`
-		Buckets                []bucketEntry `json:"buckets"`
+		Identifier              string        `json:"identifier"`
+		MaxAcPerHour            uint16        `json:"maxAcPerHour"`
+		HasTimings              bool          `json:"hasTimings"`
+		TotalSlots              int           `json:"totalSlots"`
+		AvgDwellMinutes         float64       `json:"avgDwellMinutes"`
+		EstimatedMaxOccupancy   int           `json:"estimatedMaxOccupancy"`
+		EstimatedTotalOccupancy int           `json:"estimatedTotalOccupancy"`
+		Buckets                 []bucketEntry `json:"buckets"`
 	}
 
 	// The simulator step size is stored directly on the event — no need to infer it from data gaps.
@@ -555,6 +555,245 @@ func ChartsArrivalAirports(c fiber.Ctx) error {
 		"revisionNumber": revision.Number,
 		"eventDate":      event.Date.UTC(),
 		"airports":       airports,
+	})
+}
+
+// ChartsSectorFine godoc
+//
+//	@Summary	Get fine-grained (2-minute) sector data for a single sector
+//	@Tags		charts
+//	@Security	ApiKeyAuth
+//	@Produce	json
+//	@Param		id			path	int		true	"Event ID"
+//	@Param		identifier	path	string	true	"Sector Identifier"
+//	@Success	200			{object}	object	"labels[], data[] (2-minute intervals)"
+//	@Failure	400			{object}	models.ErrorResponse
+//	@Failure	404			{object}	models.ErrorResponse
+//	@Failure	500			{object}	models.ErrorResponse
+//	@Router		/events/{id}/charts/sector/{identifier}/fine [get]
+func ChartsSectorFine(c fiber.Ctx) error {
+	id, err := strconv.ParseUint(c.Params("id"), 10, 64)
+	if err != nil {
+		return fiber.NewError(fiber.StatusBadRequest, "invalid event id")
+	}
+	identifier := c.Params("identifier")
+
+	var event models.VATSIMEvent
+	if err := database.DB.First(&event, id).Error; err != nil {
+		return fiber.NewError(fiber.StatusNotFound, "event not found")
+	}
+
+	revision, err := findLatestRevisionWithSlots(id)
+	if err != nil {
+		return err
+	}
+	if revision == nil {
+		return c.JSON(fiber.Map{"labels": []string{}, "data": []int{}})
+	}
+
+	var sector models.Sector
+	if err := database.DB.Where("identifier = ? AND (event_id = ? OR event_id IS NULL)", identifier, id).First(&sector).Error; err != nil {
+		return fiber.NewError(fiber.StatusNotFound, "sector not found")
+	}
+
+	var snapshots []models.ThroughputSnapshot
+	if err := database.DB.Where("slot_revision_id = ? AND throughput_point_type = ? AND throughput_point_id = ?",
+		revision.ID, "sector", sector.ID).
+		Find(&snapshots).Error; err != nil {
+		return err
+	}
+
+	syncBase := event.Date.UTC()
+	if tod := event.DepartureTimeWindowOffsetSynchronizationTimeOfDay; tod != "" {
+		var h, m int
+		fmt.Sscanf(tod, "%d:%d", &h, &m)
+		syncBase = syncBase.Add(time.Duration(h)*time.Hour + time.Duration(m)*time.Minute)
+	}
+
+	tickSlots := map[int]map[uint]bool{}
+	for _, sn := range snapshots {
+		if tickSlots[sn.MinuteOffset] == nil {
+			tickSlots[sn.MinuteOffset] = map[uint]bool{}
+		}
+		tickSlots[sn.MinuteOffset][sn.SlotID] = true
+	}
+
+	if len(tickSlots) == 0 {
+		return c.JSON(fiber.Map{"labels": []string{}, "data": []int{}})
+	}
+
+	minOffset, maxOffset := 0, 0
+	for offset := range tickSlots {
+		if offset < minOffset {
+			minOffset = offset
+		}
+		if offset > maxOffset {
+			maxOffset = offset
+		}
+	}
+
+	analysisResolution := int(event.SimulationAnalysisResolutionInMinutes)
+	if analysisResolution == 0 {
+		analysisResolution = 2
+	}
+
+	labels := make([]string, 0, (maxOffset-minOffset)/analysisResolution+1)
+	data := make([]int, 0, (maxOffset-minOffset)/analysisResolution+1)
+	for offset := minOffset; offset <= maxOffset; offset += analysisResolution {
+		count := 0
+		if slots, ok := tickSlots[offset]; ok {
+			count = len(slots)
+		}
+		labels = append(labels, syncBase.Add(time.Duration(offset)*time.Minute).UTC().Format("15:04Z"))
+		data = append(data, count)
+	}
+
+	return c.JSON(fiber.Map{"labels": labels, "data": data})
+}
+
+// ChartsArrivalFine godoc
+//
+//	@Summary	Get fine-grained (2-minute) arrival data for a single airport
+//	@Tags		charts
+//	@Security	ApiKeyAuth
+//	@Produce	json
+//	@Param		id			path	int		true	"Event ID"
+//	@Param		identifier	path	string	true	"Arrival Airport Identifier"
+//	@Success	200			{object}	object	"labels[], total[], depSeries[]"
+//	@Failure	400			{object}	models.ErrorResponse
+//	@Failure	404			{object}	models.ErrorResponse
+//	@Failure	500			{object}	models.ErrorResponse
+//	@Router		/events/{id}/charts/arrival/{identifier}/fine [get]
+func ChartsArrivalFine(c fiber.Ctx) error {
+	id, err := strconv.ParseUint(c.Params("id"), 10, 64)
+	if err != nil {
+		return fiber.NewError(fiber.StatusBadRequest, "invalid event id")
+	}
+	identifier := c.Params("identifier")
+
+	var event models.VATSIMEvent
+	if err := database.DB.First(&event, id).Error; err != nil {
+		return fiber.NewError(fiber.StatusNotFound, "event not found")
+	}
+
+	revision, err := findLatestRevisionWithSlots(id)
+	if err != nil {
+		return err
+	}
+	if revision == nil {
+		return c.JSON(fiber.Map{"labels": []string{}, "total": []int{}, "depSeries": []fiber.Map{}})
+	}
+
+	var airport models.Airport
+	if err := database.DB.Preload("Waypoint").
+		Joins("JOIN waypoints ON waypoints.id = airports.waypoint_id AND waypoints.identifier = ?", identifier).
+		Where("airports.event_id = ?", id).
+		First(&airport).Error; err != nil {
+		return fiber.NewError(fiber.StatusNotFound, "arrival airport not found")
+	}
+
+	type arrSlotRow struct {
+		ProjectedArrivalTime time.Time `gorm:"column:projected_arrival_time"`
+		DepIdent             string    `gorm:"column:dep_ident"`
+	}
+	var arrSlotRows []arrSlotRow
+	if err := database.DB.Raw(`
+		SELECT s.projected_arrival_time, dw.identifier as dep_ident
+		FROM slots s
+		JOIN airports da ON da.id = s.departure_airport_id
+		JOIN waypoints dw ON dw.id = da.waypoint_id
+		WHERE s.slot_revision_id = ? AND s.arrival_airport_id = ?
+	`, revision.ID, airport.ID).Scan(&arrSlotRows).Error; err != nil {
+		return err
+	}
+
+	eventDate := event.Date.UTC()
+	analysisResolution := int(event.SimulationAnalysisResolutionInMinutes)
+	if analysisResolution == 0 {
+		analysisResolution = 2
+	}
+
+	type tickEntry struct {
+		offset   int
+		depIdent string
+	}
+	var allTicks []tickEntry
+	for _, row := range arrSlotRows {
+		offset := int(row.ProjectedArrivalTime.Sub(eventDate).Minutes())
+		if row.DepIdent == "" {
+			continue
+		}
+		allTicks = append(allTicks, tickEntry{offset: offset, depIdent: row.DepIdent})
+	}
+
+	if len(allTicks) == 0 {
+		return c.JSON(fiber.Map{"labels": []string{}, "total": []int{}, "depSeries": []fiber.Map{}})
+	}
+
+	minOffset, maxOffset := allTicks[0].offset, allTicks[0].offset
+	for _, t := range allTicks {
+		if t.offset < minOffset {
+			minOffset = t.offset
+		}
+		if t.offset > maxOffset {
+			maxOffset = t.offset
+		}
+	}
+
+	depOffsets := map[string]map[int]int{}
+	for _, t := range allTicks {
+		if depOffsets[t.depIdent] == nil {
+			depOffsets[t.depIdent] = map[int]int{}
+		}
+		roundedOffset := (t.offset / analysisResolution) * analysisResolution
+		depOffsets[t.depIdent][roundedOffset]++
+	}
+
+	depColors := []string{
+		"#3b82f6", "#f59e0b", "#10b981", "#ef4444", "#8b5cf6",
+		"#06b6d4", "#f97316", "#84cc16", "#ec4899", "#6366f1",
+		"#14b8a6", "#f43f5e",
+	}
+
+	depIdents := make([]string, 0, len(depOffsets))
+	for d := range depOffsets {
+		depIdents = append(depIdents, d)
+	}
+	for i := 1; i < len(depIdents); i++ {
+		for j := i; j > 0 && depIdents[j] < depIdents[j-1]; j-- {
+			depIdents[j], depIdents[j-1] = depIdents[j-1], depIdents[j]
+		}
+	}
+
+	numPoints := (maxOffset-minOffset)/analysisResolution + 1
+	labels := make([]string, numPoints)
+	for i := 0; i < numPoints; i++ {
+		offset := minOffset + i*analysisResolution
+		labels[i] = eventDate.Add(time.Duration(offset) * time.Minute).UTC().Format("15:04Z")
+	}
+
+	total := make([]int, numPoints)
+	var depSeries []fiber.Map
+	for ci, dep := range depIdents {
+		series := make([]int, numPoints)
+		for offset, count := range depOffsets[dep] {
+			idx := (offset - minOffset) / analysisResolution
+			if idx >= 0 && idx < numPoints {
+				series[idx] = count
+				total[idx] += count
+			}
+		}
+		depSeries = append(depSeries, fiber.Map{
+			"dep":     dep,
+			"color":   depColors[ci%len(depColors)],
+			"buckets": series,
+		})
+	}
+
+	return c.JSON(fiber.Map{
+		"labels":    labels,
+		"total":     total,
+		"depSeries": depSeries,
 	})
 }
 
