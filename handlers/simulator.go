@@ -1237,28 +1237,36 @@ func ensureSlotsFromDraftEntries(eventID uint64) error {
 		return nil
 	}
 
-	// Create slots from draft entries
+	// Create slots from draft entries — one slot per SlotCount unit.
 	return database.DB.Transaction(func(tx *gorm.DB) error {
+		totalSlots := 0
 		for _, entry := range draftEntries {
-			slot := models.Slot{
-				SlotRevisionID:     revision.ID,
-				DepartureAirportID: entry.DepartureAirportID,
-				ArrivalAirportID:   entry.ArrivalAirportID,
+			count := entry.SlotCount
+			if count == 0 {
+				count = 1
 			}
-			if err := tx.Create(&slot).Error; err != nil {
-				return fmt.Errorf("failed to create slot: %w", err)
-			}
-			for order, rsID := range []uint{entry.DepRouteID, entry.TrackID, entry.ArrRouteID} {
-				if err := tx.Create(&models.SlotRouteSegment{
-					SlotID:         slot.ID,
-					RouteSegmentID: rsID,
-					Order:          uint(order),
-				}).Error; err != nil {
-					return fmt.Errorf("failed to add route segment to slot: %w", err)
+			for i := uint(0); i < count; i++ {
+				slot := models.Slot{
+					SlotRevisionID:     revision.ID,
+					DepartureAirportID: entry.DepartureAirportID,
+					ArrivalAirportID:   entry.ArrivalAirportID,
 				}
+				if err := tx.Create(&slot).Error; err != nil {
+					return fmt.Errorf("failed to create slot: %w", err)
+				}
+				for order, rsID := range []uint{entry.DepRouteID, entry.TrackID, entry.ArrRouteID} {
+					if err := tx.Create(&models.SlotRouteSegment{
+						SlotID:         slot.ID,
+						RouteSegmentID: rsID,
+						Order:          uint(order),
+					}).Error; err != nil {
+						return fmt.Errorf("failed to add route segment to slot: %w", err)
+					}
+				}
+				totalSlots++
 			}
 		}
-		log.Info().Int("slots", len(draftEntries)).Msg("[ensureSlotsFromDraftEntries] created slots from draft entries")
+		log.Info().Int("slots", totalSlots).Msg("[ensureSlotsFromDraftEntries] created slots from draft entries")
 		return nil
 	})
 }
