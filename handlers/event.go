@@ -2,6 +2,7 @@ package handlers
 
 import (
 	"strconv"
+	"time"
 
 	"github.com/gofiber/fiber/v3"
 	"github.com/vatsimnetwork/ctp-api/database"
@@ -289,6 +290,57 @@ func GetSimulatorData(c fiber.Ctx) error {
 	return c.JSON(fiber.Map{
 		"event":    event,
 		"revision": revision,
+	})
+}
+
+// GetSlotsWindow godoc
+//
+//	@Summary	Get the time window (earliest departure, latest projected arrival) and slot count for the latest revision with slots
+//	@Tags		events
+//	@Security	ApiKeyAuth
+//	@Produce	json
+//	@Param		id	path		int	true	"Event ID"
+//	@Success	200	{object}	map[string]interface{}
+//	@Failure	400	{object}	models.ErrorResponse
+//	@Router		/events/{id}/slots/window [get]
+func GetSlotsWindow(c fiber.Ctx) error {
+	id, err := strconv.ParseUint(c.Params("id"), 10, 64)
+	if err != nil {
+		return fiber.NewError(fiber.StatusBadRequest, "invalid event id")
+	}
+
+	var revision models.SlotRevision
+	if err := database.DB.
+		Where("event_id = ? AND EXISTS (SELECT 1 FROM slots WHERE slots.slot_revision_id = slot_revisions.id LIMIT 1)", id).
+		Order("number DESC").
+		First(&revision).Error; err != nil {
+		return c.JSON(fiber.Map{
+			"eventId":   id,
+			"startTime": nil,
+			"endTime":   nil,
+			"slotCount": 0,
+		})
+	}
+
+	var agg struct {
+		StartTime *time.Time
+		EndTime   *time.Time
+		SlotCount int64
+	}
+	if err := database.DB.
+		Model(&models.Slot{}).
+		Select("MIN(departure_time) AS start_time, MAX(projected_arrival_time) AS end_time, COUNT(*) AS slot_count").
+		Where("slot_revision_id = ?", revision.ID).
+		Scan(&agg).Error; err != nil {
+		return fiber.NewError(fiber.StatusInternalServerError, err.Error())
+	}
+
+	return c.JSON(fiber.Map{
+		"eventId":    id,
+		"revisionId": revision.ID,
+		"startTime":  agg.StartTime,
+		"endTime":    agg.EndTime,
+		"slotCount":  agg.SlotCount,
 	})
 }
 

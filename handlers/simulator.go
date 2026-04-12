@@ -663,10 +663,33 @@ func writeThroughputSnapshots(tx *gorm.DB, revisionID uint, resp simResponseEven
 	})
 }
 
-func writeSlotPositions(tx *gorm.DB, resp simResponseEvent) error {
+func writeSlotPositions(tx *gorm.DB, revisionID uint, resp simResponseEvent) error {
+	// Build the set of valid slot IDs for this revision so we can filter out
+	// any sim response slot IDs that don't exist in the DB (avoids silent FK failures).
+	var validSlotIDs []uint
+	if err := tx.Model(&models.Slot{}).Where("slot_revision_id = ?", revisionID).Pluck("id", &validSlotIDs).Error; err != nil {
+		return fmt.Errorf("load valid slot ids: %w", err)
+	}
+	validSet := make(map[uint]bool, len(validSlotIDs))
+	for _, id := range validSlotIDs {
+		validSet[id] = true
+	}
+
+	skippedZero := 0
+	skippedUnknown := 0
+	skippedEmpty := 0
 	var rows []positionRow
 	for _, s := range resp.Slots {
-		if s.Id == 0 || len(s.SimulatedPositions) == 0 {
+		if s.Id == 0 {
+			skippedZero++
+			continue
+		}
+		if !validSet[s.Id] {
+			skippedUnknown++
+			continue
+		}
+		if len(s.SimulatedPositions) == 0 {
+			skippedEmpty++
 			continue
 		}
 		for tsStr, coords := range s.SimulatedPositions {
@@ -685,6 +708,14 @@ func writeSlotPositions(tx *gorm.DB, resp simResponseEvent) error {
 			})
 		}
 	}
+	log.Info().
+		Int("respSlots", len(resp.Slots)).
+		Int("validDbSlots", len(validSlotIDs)).
+		Int("skippedZeroId", skippedZero).
+		Int("skippedUnknownId", skippedUnknown).
+		Int("skippedEmptyPositions", skippedEmpty).
+		Int("positionRows", len(rows)).
+		Msg("[writeSlotPositions] preparing COPY")
 	if len(rows) == 0 {
 		return nil
 	}
@@ -1191,13 +1222,17 @@ func updateSimulationSlots(eventID, revisionID uint, resp simResponseEvent, comm
 		go func() {
 			defer wg.Done()
 			t := time.Now()
-			writeThroughputSnapshots(database.DB, rid, simResp, airportByWaypoint)
+			if err := writeThroughputSnapshots(database.DB, rid, simResp, airportByWaypoint); err != nil {
+				log.Error().Err(err).Msg("[updateSimulationSlots] writeThroughputSnapshots failed")
+			}
 			log.Info().Dur("elapsed", time.Since(t)).Msg("[updateSimulationSlots] writeThroughputSnapshots done")
 		}()
 		go func() {
 			defer wg.Done()
 			t := time.Now()
-			writeSlotPositions(database.DB, simResp)
+			if err := writeSlotPositions(database.DB, rid, simResp); err != nil {
+				log.Error().Err(err).Msg("[updateSimulationSlots] writeSlotPositions failed")
+			}
 			log.Info().Dur("elapsed", time.Since(t)).Msg("[updateSimulationSlots] writeSlotPositions done")
 		}()
 		wg.Wait()

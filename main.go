@@ -78,6 +78,7 @@ func main() {
 	api.Delete("/events/:id", handlers.DeleteEvent)
 	api.Get("/events/:id/simulator-data", handlers.GetSimulatorData)
 	api.Get("/events/:id/simulator-data/latest-with-slots", handlers.GetSimulatorDataLatestWithSlots)
+	api.Get("/events/:id/slots/window", handlers.GetSlotsWindow)
 	api.Get("/events/:id/charts/departure-airports", handlers.ChartsDepartureAirports)
 	api.Get("/events/:id/charts/sectors", handlers.ChartsSectors)
 	api.Get("/events/:id/charts/sector/:identifier/fine", handlers.ChartsSectorFine)
