@@ -794,14 +794,14 @@ func saveSimulationResult(eventID uint, resp simResponseEvent, commentary string
 	var revisionNumber uint
 
 	err := database.DB.Transaction(func(tx *gorm.DB) error {
-		// Get previous revision's draft entries before we create the new one
+		// Get previous revision's draft entries
 		var prevRevision models.SlotRevision
 		var draftEntries []models.SlotDraftEntry
 		if err := tx.Where("event_id = ?", eventID).Order("number DESC").First(&prevRevision).Error; err == nil {
 			tx.Where("slot_revision_id = ?", prevRevision.ID).Find(&draftEntries)
 		}
 
-		// Create NEW revision with simulated slots
+		// Create NEW revision
 		var maxNumber uint
 		tx.Model(&models.SlotRevision{}).Where("event_id = ?", eventID).Select("COALESCE(MAX(number), 0)").Scan(&maxNumber)
 
@@ -822,7 +822,33 @@ func saveSimulationResult(eventID uint, resp simResponseEvent, commentary string
 
 		airportByWaypoint := airportWaypointLookup(tx, eventID)
 
-		// Create slots on the new revision
+		// Create slots from draft entries BEFORE simulation if no slots in response
+		if len(resp.Slots) == 0 && len(draftEntries) > 0 {
+			log.Info().Int("draftEntries", len(draftEntries)).Msg("[saveSimulation] no slots in response, creating from draft entries")
+			for _, entry := range draftEntries {
+				slot := models.Slot{
+					SlotRevisionID:     revision.ID,
+					DepartureAirportID: entry.DepartureAirportID,
+					ArrivalAirportID:   entry.ArrivalAirportID,
+				}
+				if err := tx.Create(&slot).Error; err != nil {
+					log.Error().Err(err).Msg("[saveSimulation] failed to create slot from draft")
+					continue
+				}
+				// Add route segments in order: dep route, track, arr route
+				for order, rsID := range []uint{entry.DepRouteID, entry.TrackID, entry.ArrRouteID} {
+					if err := tx.Create(&models.SlotRouteSegment{
+						SlotID:         slot.ID,
+						RouteSegmentID: rsID,
+						Order:          uint(order),
+					}).Error; err != nil {
+						log.Error().Err(err).Msg("[saveSimulation] failed to add route segment to slot")
+					}
+				}
+			}
+		}
+
+		// Update slots with simulator response times
 		for _, s := range resp.Slots {
 			slot := models.Slot{
 				SlotRevisionID:       revision.ID,
@@ -1106,7 +1132,71 @@ func CalculateSlots(c fiber.Ctx) error {
 //	@Failure	503	{object}	models.ErrorResponse
 //	@Router		/events/{id}/simulate-slots [post]
 func SimulateSlots(c fiber.Ctx) error {
+	id, err := strconv.ParseUint(c.Params("id"), 10, 64)
+	if err != nil {
+		return fiber.NewError(fiber.StatusBadRequest, "invalid event id")
+	}
+
+	// Create slots from draft entries if no slots exist yet
+	if err := ensureSlotsFromDraftEntries(id); err != nil {
+		log.Error().Err(err).Uint64("eventId", id).Msg("[SimulateSlots] failed to create slots from draft entries")
+	}
+
 	return invokeSimulator(c, "/simulateEvent", true, func(eventID uint, resp simResponseEvent, commentary string) (uint, uint, error) {
 		return saveSimulationResult(eventID, resp, commentary, json.RawMessage(nil), json.RawMessage(nil))
+	})
+}
+
+func ensureSlotsFromDraftEntries(eventID uint64) error {
+	// Check if latest revision already has slots
+	var existingSlots int64
+	database.DB.Model(&models.Slot{}).
+		Joins("JOIN slot_revisions ON slots.slot_revision_id = slot_revisions.id").
+		Where("slot_revisions.event_id = ? AND slot_revisions.number = (SELECT MAX(number) FROM slot_revisions WHERE event_id = ?)", eventID, eventID).
+		Count(&existingSlots)
+	if existingSlots > 0 {
+		return nil
+	}
+
+	// Get latest revision with draft entries
+	var revision models.SlotRevision
+	if err := database.DB.
+		Where("event_id = ?", eventID).
+		Order("number DESC").
+		First(&revision).Error; err != nil {
+		return fmt.Errorf("no revision found: %w", err)
+	}
+
+	var draftEntries []models.SlotDraftEntry
+	if err := database.DB.Where("slot_revision_id = ?", revision.ID).Find(&draftEntries).Error; err != nil {
+		return fmt.Errorf("failed to fetch draft entries: %w", err)
+	}
+	if len(draftEntries) == 0 {
+		return nil
+	}
+
+	// Create slots from draft entries
+	return database.DB.Transaction(func(tx *gorm.DB) error {
+		for _, entry := range draftEntries {
+			slot := models.Slot{
+				SlotRevisionID:     revision.ID,
+				DepartureAirportID: entry.DepartureAirportID,
+				ArrivalAirportID:   entry.ArrivalAirportID,
+			}
+			if err := tx.Create(&slot).Error; err != nil {
+				return fmt.Errorf("failed to create slot: %w", err)
+			}
+			for order, rsID := range []uint{entry.DepRouteID, entry.TrackID, entry.ArrRouteID} {
+				if err := tx.Create(&models.SlotRouteSegment{
+					SlotID:         slot.ID,
+					RouteSegmentID: rsID,
+					Order:          uint(order),
+				}).Error; err != nil {
+					return fmt.Errorf("failed to add route segment to slot: %w", err)
+				}
+			}
+		}
+		log.Info().Int("slots", len(draftEntries)).Msg("[ensureSlotsFromDraftEntries] created slots from draft entries")
+		return nil
 	})
 }
