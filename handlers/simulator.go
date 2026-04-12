@@ -784,167 +784,6 @@ func saveCalculationResult(eventID uint, resp simResponseEvent, commentary strin
 	return revisionID, 0, err
 }
 
-func saveSimulationResult(eventID uint, resp simResponseEvent, commentary string, _ json.RawMessage, _ json.RawMessage) (uint, uint, error) {
-	log.Info().
-		Uint("eventId", eventID).
-		Int("slotsInResponse", len(resp.Slots)).
-		Msg("[saveSimulation] starting")
-
-	var revisionID uint
-	var revisionNumber uint
-
-	err := database.DB.Transaction(func(tx *gorm.DB) error {
-		// Get previous revision's draft entries
-		var prevRevision models.SlotRevision
-		var draftEntries []models.SlotDraftEntry
-		if err := tx.Where("event_id = ?", eventID).Order("number DESC").First(&prevRevision).Error; err == nil {
-			tx.Where("slot_revision_id = ?", prevRevision.ID).Find(&draftEntries)
-		}
-
-		// Create NEW revision
-		var maxNumber uint
-		tx.Model(&models.SlotRevision{}).Where("event_id = ?", eventID).Select("COALESCE(MAX(number), 0)").Scan(&maxNumber)
-
-		revision := models.SlotRevision{
-			EventID:                        eventID,
-			Number:                         maxNumber + 1,
-			SlotGenerationOutputCommentary: commentary,
-		}
-		if err := tx.Create(&revision).Error; err != nil {
-			return err
-		}
-		revisionID = revision.ID
-		revisionNumber = revision.Number
-		log.Info().
-			Uint("revisionId", revision.ID).
-			Uint("revisionNumber", revision.Number).
-			Msg("[saveSimulation] created new revision")
-
-		airportByWaypoint := airportWaypointLookup(tx, eventID)
-
-		// Create slots from draft entries BEFORE simulation if no slots in response
-		if len(resp.Slots) == 0 && len(draftEntries) > 0 {
-			log.Info().Int("draftEntries", len(draftEntries)).Msg("[saveSimulation] no slots in response, creating from draft entries")
-			for _, entry := range draftEntries {
-				slot := models.Slot{
-					SlotRevisionID:     revision.ID,
-					DepartureAirportID: entry.DepartureAirportID,
-					ArrivalAirportID:   entry.ArrivalAirportID,
-				}
-				if err := tx.Create(&slot).Error; err != nil {
-					log.Error().Err(err).Msg("[saveSimulation] failed to create slot from draft")
-					continue
-				}
-				// Add route segments in order: dep route, track, arr route
-				for order, rsID := range []uint{entry.DepRouteID, entry.TrackID, entry.ArrRouteID} {
-					if err := tx.Create(&models.SlotRouteSegment{
-						SlotID:         slot.ID,
-						RouteSegmentID: rsID,
-						Order:          uint(order),
-					}).Error; err != nil {
-						log.Error().Err(err).Msg("[saveSimulation] failed to add route segment to slot")
-					}
-				}
-			}
-		}
-
-		// Update slots with simulator response times
-		for _, s := range resp.Slots {
-			slot := models.Slot{
-				SlotRevisionID:       revision.ID,
-				DepartureTime:        s.DepartureTime.Time,
-				ProjectedArrivalTime: s.ProjectedArrivalTime.Time,
-				DepartureAirportID:   airportByWaypoint[s.DepartureAirport],
-				ArrivalAirportID:     airportByWaypoint[s.ArrivalAirport],
-			}
-			if err := tx.Create(&slot).Error; err != nil {
-				return err
-			}
-			for i, rsID := range s.RouteSegments {
-				if err := tx.Create(&models.SlotRouteSegment{
-					SlotID:         slot.ID,
-					RouteSegmentID: rsID,
-					Order:          uint(i),
-				}).Error; err != nil {
-					return err
-				}
-			}
-		}
-
-		// Copy draft entries from previous revision to this new revision
-		if len(draftEntries) > 0 {
-			for i := range draftEntries {
-				draftEntries[i].ID = 0
-				draftEntries[i].SlotRevisionID = revision.ID
-			}
-			if err := tx.Create(&draftEntries).Error; err != nil {
-				log.Error().Err(err).Msg("[saveSimulation] failed to copy draft entries")
-			} else {
-				log.Info().Int("copied", len(draftEntries)).Msg("[saveSimulation] copied draft entries to new revision")
-			}
-		}
-
-		return nil
-	})
-	if err != nil {
-		log.Error().Err(err).Uint("eventId", eventID).Msg("[saveSimulation] transaction failed")
-		return revisionID, 0, err
-	}
-	log.Info().Uint("revisionId", revisionID).Msg("[saveSimulation] transaction committed")
-
-	// ── Background: write throughput data, clean up old revisions ─────────────
-	// Snapshots/states for old revisions are purged here, keeping only the newest.
-	// resp is captured by value; revisionID/eventID are primitives — safe for goroutine.
-	go func(rid uint, eid uint, simResp simResponseEvent) {
-		log.Info().Uint("revisionId", rid).Uint("eventId", eid).Msg("[saveSimulation] background throughput write starting")
-		bgStart := time.Now()
-
-		// Drop all throughput data for every revision of this event except the current one.
-		t := time.Now()
-		database.DB.Exec(
-			"DELETE FROM throughput_snapshots WHERE slot_revision_id IN (SELECT id FROM slot_revisions WHERE event_id = ? AND id != ?)",
-			eid, rid,
-		)
-		database.DB.Exec(
-			"DELETE FROM throughput_states WHERE slot_revision_id IN (SELECT id FROM slot_revisions WHERE event_id = ? AND id != ?)",
-			eid, rid,
-		)
-		// Also replace any existing data for the current revision (handles re-runs).
-		database.DB.Where("slot_revision_id = ?", rid).Delete(&models.ThroughputSnapshot{})
-		database.DB.Where("slot_revision_id = ?", rid).Delete(&models.ThroughputState{})
-		database.DB.Exec("DELETE FROM slot_positions WHERE slot_id IN (SELECT id FROM slots WHERE slot_revision_id = ?)", rid)
-		log.Info().Dur("elapsed", time.Since(t)).Msg("[saveSimulation] old data purged")
-
-		airportByWaypoint := airportWaypointLookup(database.DB, eid)
-
-		t = time.Now()
-		writeThroughputStates(database.DB, rid, simResp, airportByWaypoint)
-		updateAirportDepartureTimeWindows(database.DB, simResp, airportByWaypoint)
-		updateAirportEarliestArrivals(database.DB, simResp, airportByWaypoint)
-		log.Info().Dur("elapsed", time.Since(t)).Msg("[saveSimulation] writeThroughputStates + airport time windows done")
-
-		var wg sync.WaitGroup
-		wg.Add(2)
-		go func() {
-			defer wg.Done()
-			t := time.Now()
-			writeThroughputSnapshots(database.DB, rid, simResp, airportByWaypoint)
-			log.Info().Dur("elapsed", time.Since(t)).Msg("[saveSimulation] writeThroughputSnapshots done")
-		}()
-		go func() {
-			defer wg.Done()
-			t := time.Now()
-			writeSlotPositions(database.DB, simResp)
-			log.Info().Dur("elapsed", time.Since(t)).Msg("[saveSimulation] writeSlotPositions done")
-		}()
-		wg.Wait()
-
-		log.Info().Uint("revisionId", rid).Dur("totalElapsed", time.Since(bgStart)).Msg("[saveSimulation] background throughput write complete")
-		simStatusStore.Delete(uint64(eid))
-	}(revisionID, eventID, resp)
-
-	return revisionID, revisionNumber, nil
-}
 
 func invokeSimulator(c fiber.Ctx, path string, includeSlots bool, save func(uint, simResponseEvent, string) (uint, uint, error)) error {
 	if config.C.SimulatorURL == "" {
@@ -1132,19 +971,242 @@ func CalculateSlots(c fiber.Ctx) error {
 //	@Failure	503	{object}	models.ErrorResponse
 //	@Router		/events/{id}/simulate-slots [post]
 func SimulateSlots(c fiber.Ctx) error {
+	if config.C.SimulatorURL == "" {
+		return fiber.NewError(fiber.StatusServiceUnavailable, "simulator not configured")
+	}
+
 	id, err := strconv.ParseUint(c.Params("id"), 10, 64)
 	if err != nil {
 		return fiber.NewError(fiber.StatusBadRequest, "invalid event id")
 	}
 
-	// Create slots from draft entries if no slots exist yet
+	// Step 1: Create a new revision and copy draft entries from the previous one.
+	revisionID, revisionNumber, err := prepareSimulationRevision(id)
+	if err != nil {
+		return fiber.NewError(fiber.StatusInternalServerError, "failed to prepare revision: "+err.Error())
+	}
+	log.Info().Uint("revisionId", revisionID).Uint("revisionNumber", revisionNumber).Uint64("eventId", id).
+		Msg("[SimulateSlots] created new revision with draft entries")
+
+	// Step 2: Create actual slots from draft entries on the new revision.
 	if err := ensureSlotsFromDraftEntries(id); err != nil {
 		log.Error().Err(err).Uint64("eventId", id).Msg("[SimulateSlots] failed to create slots from draft entries")
 	}
 
-	return invokeSimulator(c, "/simulateEvent", true, func(eventID uint, resp simResponseEvent, commentary string) (uint, uint, error) {
-		return saveSimulationResult(eventID, resp, commentary, json.RawMessage(nil), json.RawMessage(nil))
+	// Step 3: Fetch data (will pick up the new revision as latest) and call the simulator.
+	event, revision, err := fetchSimulatorData(id)
+	if err != nil {
+		return err
+	}
+
+	slotCount := 0
+	if revision != nil {
+		slotCount = len(revision.Slots)
+	}
+	log.Info().Uint64("eventId", id).Int("slots", slotCount).Msg("[SimulateSlots] fetched data, calling simulator")
+
+	payload := buildSimEvent(*event, revision, true)
+	body, err := json.Marshal(payload)
+	if err != nil {
+		return fiber.NewError(fiber.StatusInternalServerError, "failed to serialize payload")
+	}
+
+	ctx, cancel := context.WithTimeout(c.Context(), simulatorTimeout)
+	defer cancel()
+
+	simStatusStore.Store(id, "running")
+	respBody, statusCode, err := callSimulator(ctx, "/simulateEvent", body)
+	if err != nil {
+		simStatusStore.Delete(id)
+		log.Error().Err(err).Msg("[SimulateSlots] simulator call failed")
+		return fiber.NewError(fiber.StatusBadGateway, "simulator request failed: "+err.Error())
+	}
+	log.Info().Int("status", statusCode).Int("responseBytes", len(respBody)).Msg("[SimulateSlots] simulator responded")
+
+	if statusCode == http.StatusInternalServerError {
+		simStatusStore.Delete(id)
+		return fiber.NewError(fiber.StatusBadGateway, "simulator calculation error: "+string(respBody))
+	}
+	if statusCode != http.StatusOK {
+		simStatusStore.Delete(id)
+		return fiber.NewError(fiber.StatusBadGateway, fmt.Sprintf("simulator returned %d", statusCode))
+	}
+
+	respBody = bytes.TrimPrefix(respBody, []byte("\xef\xbb\xbf"))
+
+	var simResp simResponseEvent
+	if err := json.Unmarshal(respBody, &simResp); err != nil {
+		simStatusStore.Delete(id)
+		preview := respBody
+		if len(preview) > 512 {
+			preview = preview[:512]
+		}
+		log.Error().Str("bodyPreview", string(preview)).Msgf("failed to parse simulator response: %s", err)
+		return fiber.NewError(fiber.StatusInternalServerError, "failed to parse simulator response: "+err.Error())
+	}
+
+	log.Info().Int("slotsInResponse", len(simResp.Slots)).Msg("[SimulateSlots] parsed simulator response, updating slots")
+
+	simLatestResponseStore.Store(id, respBody)
+	simStatusStore.Store(id, "sim_responded")
+
+	commentary := strings.Join(simResp.CalculationParameters.SimulationOutputComments, "\n")
+
+	// Step 4: Update existing slots on the revision with times from the simulator response.
+	if err := updateSimulationSlots(uint(id), revisionID, simResp, commentary); err != nil {
+		simStatusStore.Delete(id)
+		return fiber.NewError(fiber.StatusInternalServerError, "failed to save simulator results: "+err.Error())
+	}
+
+	simStatusStore.Store(id, "saved")
+
+	return c.JSON(fiber.Map{
+		"slotRevisionId":                 revisionID,
+		"slotRevisionNumber":             revisionNumber,
+		"slotGenerationOutputCommentary": strings.Join(simResp.CalculationParameters.SlotGenerationOutputComments, "\n"),
+		"simulationOutputCommentary":     commentary,
 	})
+}
+
+// prepareSimulationRevision creates a new slot revision for the event and copies
+// draft entries + draft commentary from the previous revision.
+func prepareSimulationRevision(eventID uint64) (uint, uint, error) {
+	var revisionID uint
+	var revisionNumber uint
+
+	err := database.DB.Transaction(func(tx *gorm.DB) error {
+		// Find the previous revision (if any) to copy draft data from.
+		var prevRevision models.SlotRevision
+		var draftEntries []models.SlotDraftEntry
+		hasPrev := false
+		if err := tx.Where("event_id = ?", eventID).Order("number DESC").First(&prevRevision).Error; err == nil {
+			hasPrev = true
+			tx.Where("slot_revision_id = ?", prevRevision.ID).Find(&draftEntries)
+		}
+
+		// Determine the next revision number.
+		var maxNumber uint
+		tx.Model(&models.SlotRevision{}).Where("event_id = ?", eventID).Select("COALESCE(MAX(number), 0)").Scan(&maxNumber)
+
+		revision := models.SlotRevision{
+			EventID: uint(eventID),
+			Number:  maxNumber + 1,
+		}
+		// Carry forward the slot planner draft commentary.
+		if hasPrev {
+			revision.SlotPlannerDraftCommentary = prevRevision.SlotPlannerDraftCommentary
+		}
+		if err := tx.Create(&revision).Error; err != nil {
+			return err
+		}
+		revisionID = revision.ID
+		revisionNumber = revision.Number
+
+		// Copy draft entries to the new revision.
+		if len(draftEntries) > 0 {
+			for i := range draftEntries {
+				draftEntries[i].ID = 0
+				draftEntries[i].SlotRevisionID = revision.ID
+			}
+			if err := tx.Create(&draftEntries).Error; err != nil {
+				return fmt.Errorf("failed to copy draft entries: %w", err)
+			}
+			log.Info().Int("copied", len(draftEntries)).Uint("revisionId", revision.ID).
+				Msg("[prepareSimulationRevision] copied draft entries to new revision")
+		}
+
+		return nil
+	})
+
+	return revisionID, revisionNumber, err
+}
+
+// updateSimulationSlots updates the existing slots on the given revision with
+// departure/arrival times from the simulator response, then writes throughput data.
+func updateSimulationSlots(eventID, revisionID uint, resp simResponseEvent, commentary string) error {
+	log.Info().
+		Uint("eventId", eventID).
+		Uint("revisionId", revisionID).
+		Int("slotsInResponse", len(resp.Slots)).
+		Msg("[updateSimulationSlots] starting")
+
+	err := database.DB.Transaction(func(tx *gorm.DB) error {
+		// Update the revision commentary.
+		if err := tx.Model(&models.SlotRevision{}).Where("id = ?", revisionID).Updates(map[string]interface{}{
+			"simulation_output_commentary": commentary,
+		}).Error; err != nil {
+			return fmt.Errorf("failed to update revision commentary: %w", err)
+		}
+
+		// Update each existing slot with the simulator's computed times.
+		for _, s := range resp.Slots {
+			if s.Id == 0 {
+				continue
+			}
+			if err := tx.Model(&models.Slot{}).Where("id = ? AND slot_revision_id = ?", s.Id, revisionID).Updates(map[string]interface{}{
+				"departure_time":         s.DepartureTime.Time,
+				"projected_arrival_time": s.ProjectedArrivalTime.Time,
+			}).Error; err != nil {
+				log.Error().Err(err).Uint("slotId", s.Id).Msg("[updateSimulationSlots] failed to update slot")
+			}
+		}
+
+		return nil
+	})
+	if err != nil {
+		log.Error().Err(err).Uint("eventId", eventID).Msg("[updateSimulationSlots] transaction failed")
+		return err
+	}
+	log.Info().Uint("revisionId", revisionID).Msg("[updateSimulationSlots] transaction committed")
+
+	// Background: write throughput data and clean up old revisions.
+	go func(rid uint, eid uint, simResp simResponseEvent) {
+		log.Info().Uint("revisionId", rid).Uint("eventId", eid).Msg("[updateSimulationSlots] background throughput write starting")
+		bgStart := time.Now()
+
+		t := time.Now()
+		database.DB.Exec(
+			"DELETE FROM throughput_snapshots WHERE slot_revision_id IN (SELECT id FROM slot_revisions WHERE event_id = ? AND id != ?)",
+			eid, rid,
+		)
+		database.DB.Exec(
+			"DELETE FROM throughput_states WHERE slot_revision_id IN (SELECT id FROM slot_revisions WHERE event_id = ? AND id != ?)",
+			eid, rid,
+		)
+		database.DB.Where("slot_revision_id = ?", rid).Delete(&models.ThroughputSnapshot{})
+		database.DB.Where("slot_revision_id = ?", rid).Delete(&models.ThroughputState{})
+		database.DB.Exec("DELETE FROM slot_positions WHERE slot_id IN (SELECT id FROM slots WHERE slot_revision_id = ?)", rid)
+		log.Info().Dur("elapsed", time.Since(t)).Msg("[updateSimulationSlots] old data purged")
+
+		airportByWaypoint := airportWaypointLookup(database.DB, eid)
+
+		t = time.Now()
+		writeThroughputStates(database.DB, rid, simResp, airportByWaypoint)
+		updateAirportDepartureTimeWindows(database.DB, simResp, airportByWaypoint)
+		updateAirportEarliestArrivals(database.DB, simResp, airportByWaypoint)
+		log.Info().Dur("elapsed", time.Since(t)).Msg("[updateSimulationSlots] writeThroughputStates + airport time windows done")
+
+		var wg sync.WaitGroup
+		wg.Add(2)
+		go func() {
+			defer wg.Done()
+			t := time.Now()
+			writeThroughputSnapshots(database.DB, rid, simResp, airportByWaypoint)
+			log.Info().Dur("elapsed", time.Since(t)).Msg("[updateSimulationSlots] writeThroughputSnapshots done")
+		}()
+		go func() {
+			defer wg.Done()
+			t := time.Now()
+			writeSlotPositions(database.DB, simResp)
+			log.Info().Dur("elapsed", time.Since(t)).Msg("[updateSimulationSlots] writeSlotPositions done")
+		}()
+		wg.Wait()
+
+		log.Info().Uint("revisionId", rid).Dur("totalElapsed", time.Since(bgStart)).Msg("[updateSimulationSlots] background throughput write complete")
+		simStatusStore.Delete(uint64(eid))
+	}(revisionID, eventID, resp)
+
+	return nil
 }
 
 func ensureSlotsFromDraftEntries(eventID uint64) error {
