@@ -784,85 +784,79 @@ func saveCalculationResult(eventID uint, resp simResponseEvent, commentary strin
 	return revisionID, 0, err
 }
 
-func saveSimulationResult(eventID uint, resp simResponseEvent, commentary string, slotGroupsJSON json.RawMessage, capsJSON json.RawMessage) (uint, uint, error) {
+func saveSimulationResult(eventID uint, resp simResponseEvent, commentary string, _ json.RawMessage, _ json.RawMessage) (uint, uint, error) {
 	log.Info().
 		Uint("eventId", eventID).
 		Int("slotsInResponse", len(resp.Slots)).
-		Int("slotGroupsBodyLen", len(slotGroupsJSON)).
 		Msg("[saveSimulation] starting")
 
 	var revisionID uint
-	var draftRevisionNumber uint
+	var revisionNumber uint
 
-	// ── Main transaction: only slot times + commentary ────────────────────────
-	// Throughput states/snapshots are written in a background goroutine below so
-	// they don't block the response.
 	err := database.DB.Transaction(func(tx *gorm.DB) error {
-		var revision models.SlotRevision
-		if err := tx.Where("event_id = ? AND EXISTS (SELECT 1 FROM slots WHERE slot_revision_id = slot_revisions.id)", eventID).Order("number DESC").First(&revision).Error; err != nil {
-			log.Error().Err(err).Uint("eventId", eventID).Msg("[saveSimulation] could not find slot revision")
-			return fiber.NewError(fiber.StatusNotFound, "no slot revision found to attach simulation results to")
+		// Get previous revision's draft entries before we create the new one
+		var prevRevision models.SlotRevision
+		var draftEntries []models.SlotDraftEntry
+		if err := tx.Where("event_id = ?", eventID).Order("number DESC").First(&prevRevision).Error; err == nil {
+			tx.Where("slot_revision_id = ?", prevRevision.ID).Find(&draftEntries)
+		}
+
+		// Create NEW revision with simulated slots
+		var maxNumber uint
+		tx.Model(&models.SlotRevision{}).Where("event_id = ?", eventID).Select("COALESCE(MAX(number), 0)").Scan(&maxNumber)
+
+		revision := models.SlotRevision{
+			EventID:                        eventID,
+			Number:                         maxNumber + 1,
+			SlotGenerationOutputCommentary: commentary,
+		}
+		if err := tx.Create(&revision).Error; err != nil {
+			return err
 		}
 		revisionID = revision.ID
+		revisionNumber = revision.Number
 		log.Info().
 			Uint("revisionId", revision.ID).
 			Uint("revisionNumber", revision.Number).
-			Msg("[saveSimulation] found revision, updating commentary")
+			Msg("[saveSimulation] created new revision")
 
-		if err := tx.Model(&revision).Update("simulation_output_commentary", commentary).Error; err != nil {
-			log.Error().Err(err).Msg("[saveSimulation] failed to update commentary")
-			return err
-		}
+		airportByWaypoint := airportWaypointLookup(tx, eventID)
 
-		// Batch-update departure/arrival times — one query instead of one per slot.
-		type slotTime struct {
-			id  uint
-			dep time.Time
-			arr time.Time
-		}
-		toUpdate := make([]slotTime, 0, len(resp.Slots))
+		// Create slots on the new revision
 		for _, s := range resp.Slots {
-			if s.Id == 0 || s.DepartureTime.IsZero() {
-				continue
+			slot := models.Slot{
+				SlotRevisionID:       revision.ID,
+				DepartureTime:        s.DepartureTime.Time,
+				ProjectedArrivalTime: s.ProjectedArrivalTime.Time,
+				DepartureAirportID:   airportByWaypoint[s.DepartureAirport],
+				ArrivalAirportID:     airportByWaypoint[s.ArrivalAirport],
 			}
-			toUpdate = append(toUpdate, slotTime{s.Id, s.DepartureTime.Time, s.ProjectedArrivalTime.Time})
+			if err := tx.Create(&slot).Error; err != nil {
+				return err
+			}
+			for i, rsID := range s.RouteSegments {
+				if err := tx.Create(&models.SlotRouteSegment{
+					SlotID:         slot.ID,
+					RouteSegmentID: rsID,
+					Order:          uint(i),
+				}).Error; err != nil {
+					return err
+				}
+			}
 		}
-		zeroSlots := len(resp.Slots) - len(toUpdate)
 
-		updatedSlots := 0
-		missedSlots := 0
-		if len(toUpdate) > 0 {
-			ids := make([]uint, len(toUpdate))
-			depCase := "CASE id"
-			arrCase := "CASE id"
-			for i, st := range toUpdate {
-				ids[i] = st.id
-				depCase += fmt.Sprintf(" WHEN %d THEN '%s'::timestamptz", st.id, st.dep.UTC().Format("2006-01-02T15:04:05Z"))
-				arrCase += fmt.Sprintf(" WHEN %d THEN '%s'::timestamptz", st.id, st.arr.UTC().Format("2006-01-02T15:04:05Z"))
+		// Copy draft entries from previous revision to this new revision
+		if len(draftEntries) > 0 {
+			for i := range draftEntries {
+				draftEntries[i].ID = 0
+				draftEntries[i].SlotRevisionID = revision.ID
 			}
-			depCase += " END"
-			arrCase += " END"
-
-			res := tx.Model(&models.Slot{}).
-				Where("id IN ? AND slot_revision_id = ?", ids, revision.ID).
-				Updates(map[string]interface{}{
-					"departure_time":         gorm.Expr(depCase),
-					"projected_arrival_time": gorm.Expr(arrCase),
-				})
-			if res.Error != nil {
-				log.Error().Err(res.Error).Msg("[saveSimulation] bulk slot time update failed")
-				return res.Error
+			if err := tx.Create(&draftEntries).Error; err != nil {
+				log.Error().Err(err).Msg("[saveSimulation] failed to copy draft entries")
+			} else {
+				log.Info().Int("copied", len(draftEntries)).Msg("[saveSimulation] copied draft entries to new revision")
 			}
-			updatedSlots = int(res.RowsAffected)
-			missedSlots = len(toUpdate) - updatedSlots
 		}
-		log.Info().
-			Int("updated", updatedSlots).
-			Int("missed", missedSlots).
-			Int("zeroId", zeroSlots).
-			Int("total", len(resp.Slots)).
-			Uint("revisionId", revision.ID).
-			Msg("[saveSimulation] slot time update complete")
 
 		return nil
 	})
@@ -870,33 +864,7 @@ func saveSimulationResult(eventID uint, resp simResponseEvent, commentary string
 		log.Error().Err(err).Uint("eventId", eventID).Msg("[saveSimulation] transaction failed")
 		return revisionID, 0, err
 	}
-	log.Info().Uint("revisionId", revisionID).Msg("[saveSimulation] core transaction committed")
-
-	// ── Draft revision (outside transaction) ──────────────────────────────────
-	if len(slotGroupsJSON) > 0 {
-		draftCommentary, _ := json.Marshal(map[string]interface{}{
-			"slotGroups": json.RawMessage(slotGroupsJSON),
-			"caps":       json.RawMessage(capsJSON),
-			"draft":      true,
-		})
-
-		var maxNumber uint
-		database.DB.Model(&models.SlotRevision{}).Where("event_id = ?", eventID).Select("COALESCE(MAX(number), 0)").Scan(&maxNumber)
-
-		draft := models.SlotRevision{
-			EventID:                    eventID,
-			Number:                     maxNumber + 1,
-			SlotPlannerDraftCommentary: string(draftCommentary),
-		}
-		if createErr := database.DB.Create(&draft).Error; createErr != nil {
-			log.Error().Err(createErr).Msg("[saveSimulation] failed to create draft revision")
-		} else {
-			draftRevisionNumber = draft.Number
-			log.Info().Uint("draftNumber", draftRevisionNumber).Msg("[saveSimulation] draft revision created")
-		}
-	} else {
-		log.Warn().Msg("[saveSimulation] no slotGroups in request body — skipping draft creation")
-	}
+	log.Info().Uint("revisionId", revisionID).Msg("[saveSimulation] transaction committed")
 
 	// ── Background: write throughput data, clean up old revisions ─────────────
 	// Snapshots/states for old revisions are purged here, keeping only the newest.
@@ -949,7 +917,7 @@ func saveSimulationResult(eventID uint, resp simResponseEvent, commentary string
 		simStatusStore.Delete(uint64(eid))
 	}(revisionID, eventID, resp)
 
-	return revisionID, draftRevisionNumber, nil
+	return revisionID, revisionNumber, nil
 }
 
 func invokeSimulator(c fiber.Ctx, path string, includeSlots bool, save func(uint, simResponseEvent, string) (uint, uint, error)) error {
@@ -1054,11 +1022,9 @@ func invokeSimulator(c fiber.Ctx, path string, includeSlots bool, save func(uint
 
 	resp := fiber.Map{
 		"slotRevisionId":                 revisionID,
+		"slotRevisionNumber":             draftRevisionNumber,
 		"slotGenerationOutputCommentary": strings.Join(simResp.CalculationParameters.SlotGenerationOutputComments, "\n"),
 		"simulationOutputCommentary":     strings.Join(simResp.CalculationParameters.SimulationOutputComments, "\n"),
-	}
-	if draftRevisionNumber > 0 {
-		resp["draftRevisionNumber"] = draftRevisionNumber
 	}
 	return c.JSON(resp)
 }
@@ -1131,7 +1097,6 @@ func CalculateSlots(c fiber.Ctx) error {
 //	@Summary	Send event data and current slots to simulator for simulation
 //	@Tags		simulator
 //	@Security	ApiKeyAuth
-//	@Accept		json
 //	@Produce	json
 //	@Param		id	path		int		true	"Event ID"
 //	@Success	200	{object}	object	"{ slotRevisionId: uint, draftRevisionNumber?: uint }"
@@ -1141,13 +1106,7 @@ func CalculateSlots(c fiber.Ctx) error {
 //	@Failure	503	{object}	models.ErrorResponse
 //	@Router		/events/{id}/simulate-slots [post]
 func SimulateSlots(c fiber.Ctx) error {
-	var body struct {
-		SlotGroups json.RawMessage `json:"slotGroups"`
-		Caps       json.RawMessage `json:"caps"`
-	}
-	_ = c.Bind().JSON(&body) // body is optional; ignore parse errors
-
 	return invokeSimulator(c, "/simulateEvent", true, func(eventID uint, resp simResponseEvent, commentary string) (uint, uint, error) {
-		return saveSimulationResult(eventID, resp, commentary, body.SlotGroups, body.Caps)
+		return saveSimulationResult(eventID, resp, commentary, json.RawMessage(nil), json.RawMessage(nil))
 	})
 }

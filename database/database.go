@@ -43,6 +43,7 @@ func Connect() {
 		&models.SlotRevision{},
 		&models.Slot{},
 		&models.SlotRouteSegment{},
+		&models.SlotDraftEntry{},
 		&models.ThroughputState{},
 		&models.ThroughputSnapshot{},
 		&models.Airway{},

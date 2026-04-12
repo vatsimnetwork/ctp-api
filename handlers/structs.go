@@ -265,3 +265,38 @@ type slotPositionTimestamp struct {
 	Latitude  float64 `json:"latitude"`
 	Longitude float64 `json:"longitude"`
 }
+
+// --- Slot Draft Entry ---
+
+type SlotDraftEntryInput struct {
+	DepartureAirportID uint `json:"departureAirportId"`
+	DepRouteID         uint `json:"depRouteId"`
+	TrackID            uint `json:"trackId"`
+	ArrRouteID         uint `json:"arrRouteId"`
+	ArrivalAirportID   uint `json:"arrivalAirportId"`
+	SlotCount          uint `json:"slotCount"`
+}
+
+type MigrateSlotDraftEntriesResponse struct {
+	Migrated int `json:"migrated"`
+	Skipped  int `json:"skipped"`
+	Errors   int `json:"errors"`
+}
+
+type slotDraftEntryGroupJSON struct {
+	DepAirportID uint `json:"depAirportId"`
+	DepRouteID   uint `json:"depRouteId"`
+	TrackID      uint `json:"trackId"`
+	ArrRouteID   uint `json:"arrRouteId"`
+	ArrAirportID uint `json:"arrAirportId"`
+	Value        uint `json:"value"`
+}
+
+type slotDraftEntryGroup struct {
+	DepAirportID uint
+	DepRouteID   uint
+	TrackID      uint
+	ArrRouteID   uint
+	ArrAirportID uint
+	SlotCount    uint
+}

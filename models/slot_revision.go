@@ -13,4 +13,5 @@ type SlotRevision struct {
 	Slots                          []Slot               `gorm:"foreignKey:SlotRevisionID;constraint:OnDelete:CASCADE;" json:"slots,omitempty"`
 	ThroughputStates               []ThroughputState    `gorm:"foreignKey:SlotRevisionID;constraint:OnDelete:CASCADE;" json:"throughputStates,omitempty"`
 	ThroughputSnapshots            []ThroughputSnapshot `gorm:"foreignKey:SlotRevisionID;constraint:OnDelete:CASCADE;" json:"throughputSnapshots,omitempty"`
+	SlotDraftEntries               []SlotDraftEntry     `gorm:"foreignKey:SlotRevisionID;constraint:OnDelete:CASCADE;" json:"slotDraftEntries,omitempty"`
 }

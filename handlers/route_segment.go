@@ -1,6 +1,8 @@
 package handlers
 
 import (
+	"fmt"
+	"log"
 	"strconv"
 	"strings"
 
@@ -118,7 +120,41 @@ func BatchSaveRouteSegments(c fiber.Ctx) error {
 	}
 
 	err := database.DB.Transaction(func(tx *gorm.DB) error {
+		var latestRevision models.SlotRevision
+		tx.Order("number DESC").First(&latestRevision)
+		latestRevisionID := latestRevision.ID
+
+		log.Printf("[batch-save-routes] latestRevisionID=%d (number=%d), deletes=%v", latestRevisionID, latestRevision.Number, payload.Deletes)
+
 		for _, del := range payload.Deletes {
+			log.Printf("[batch-save-routes] processing delete for route %d", del)
+
+			var totalCount int64
+			tx.Model(&models.SlotDraftEntry{}).
+				Where("dep_route_id = ? OR track_id = ? OR arr_route_id = ?", del, del, del).
+				Count(&totalCount)
+
+			log.Printf("[batch-save-routes] route %d: totalCount=%d", del, totalCount)
+
+			if totalCount > 0 {
+				var latestCount int64
+				tx.Model(&models.SlotDraftEntry{}).
+					Where("slot_revision_id = ? AND (dep_route_id = ? OR track_id = ? OR arr_route_id = ?)",
+						latestRevisionID, del, del, del).
+					Count(&latestCount)
+				log.Printf("[batch-save-routes] route %d: latestCount=%d (latestRevisionID=%d)", del, latestCount, latestRevisionID)
+
+				if latestCount > 0 {
+					log.Printf("[batch-save-routes] route %d: BLOCKING delete - in latest revision", del)
+					return fmt.Errorf("cannot delete route segment %d: it is used in the latest slot revision's draft. Remove or re-route those slot groups first.", del)
+				}
+
+				log.Printf("[batch-save-routes] route %d: cleaning up entries from old revisions (totalCount=%d)", del, totalCount)
+				tx.Where("(dep_route_id = ? OR track_id = ? OR arr_route_id = ?) AND slot_revision_id != ?",
+					del, del, del, latestRevisionID).Delete(&models.SlotDraftEntry{})
+			}
+
+			log.Printf("[batch-save-routes] route %d: proceeding with delete", del)
 			seg := models.RouteSegment{}
 			seg.ID = del
 			if err := tx.Model(&seg).Association("ProvidedFacilityProgression").Clear(); err != nil {
@@ -313,7 +349,11 @@ func BatchSaveRouteSegments(c fiber.Ctx) error {
 	})
 
 	if err != nil {
-		return fiber.NewError(fiber.StatusInternalServerError, err.Error())
+		errStr := err.Error()
+		if strings.Contains(errStr, "cannot delete route segment") {
+			return fiber.NewError(fiber.StatusConflict, errStr)
+		}
+		return fiber.NewError(fiber.StatusInternalServerError, errStr)
 	}
 
 	return c.JSON(fiber.Map{"success": true})
@@ -372,6 +412,39 @@ func DeleteRouteSegment(c fiber.Ctx) error {
 	id, err := strconv.ParseUint(c.Params("id"), 10, 64)
 	if err != nil {
 		return fiber.NewError(fiber.StatusBadRequest, "invalid route segment id")
+	}
+
+	var latestRevision models.SlotRevision
+	database.DB.Order("number DESC").First(&latestRevision)
+	latestRevisionID := latestRevision.ID
+
+	log.Printf("[delete-route] route_id=%d, latestRevisionID=%d (number=%d)", id, latestRevisionID, latestRevision.Number)
+
+	var count int64
+	var oldRevisionCount int64
+	database.DB.Model(&models.SlotDraftEntry{}).
+		Where("slot_revision_id = ? AND (dep_route_id = ? OR track_id = ? OR arr_route_id = ?)",
+			latestRevisionID, id, id, id).
+		Count(&count)
+
+	log.Printf("[delete-route] checking latest revision: count=%d", count)
+
+	if count > 0 {
+		return fiber.NewError(fiber.StatusConflict,
+			"Cannot delete: route is used in the latest slot revision's draft. Remove or re-route those slot groups first.")
+	}
+
+	if latestRevisionID > 0 {
+		database.DB.Model(&models.SlotDraftEntry{}).
+			Where("slot_revision_id != ? AND (dep_route_id = ? OR track_id = ? OR arr_route_id = ?)",
+				latestRevisionID, id, id, id).
+			Count(&oldRevisionCount)
+	}
+
+	if oldRevisionCount > 0 {
+		log.Printf("[delete-route] cleaning up old revision entries: oldRevisionCount=%d", oldRevisionCount)
+		database.DB.Where("slot_revision_id != ? AND (dep_route_id = ? OR track_id = ? OR arr_route_id = ?)",
+			latestRevisionID, id, id, id).Delete(&models.SlotDraftEntry{})
 	}
 
 	seg := models.RouteSegment{}

@@ -121,6 +121,9 @@ func main() {
 	api.Post("/slot-revisions/:revisionId/slots", handlers.AddSlotsToRevision)
 	api.Post("/slot-revisions/:revisionId/throughput-states", handlers.AddThroughputStatesToRevision)
 	api.Post("/slot-revisions/:revisionId/throughput-snapshots", handlers.AddThroughputSnapshotsToRevision)
+	api.Get("/slot-revisions/:revisionId/draft-entries", handlers.ListSlotDraftEntries)
+	api.Post("/slot-revisions/:revisionId/draft-entries", handlers.AddSlotDraftEntries)
+	api.Post("/slot-draft-entries/migrate", handlers.MigrateSlotDraftEntries)
 
 	api.Get("/route-segments", handlers.ListAllRouteSegments)
 	api.Get("/events/:eventId/route-segments", handlers.ListEventRouteSegments)
