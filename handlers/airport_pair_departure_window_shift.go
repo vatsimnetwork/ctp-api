@@ -10,13 +10,6 @@ import (
 	"gorm.io/gorm"
 )
 
-type WindowShiftInput struct {
-	DepartureAirportID uint    `json:"departureAirportId"`
-	ArrivalAirportID   uint    `json:"arrivalAirportId"`
-	StartShiftHours    float64 `json:"startShiftHours"`
-	EndShiftHours      float64 `json:"endShiftHours"`
-}
-
 // ListWindowShifts godoc
 //
 //	@Summary	List airport pair departure window shifts for a revision
