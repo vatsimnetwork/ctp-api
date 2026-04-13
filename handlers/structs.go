@@ -142,19 +142,19 @@ type simTagLimit struct {
 }
 
 type simEvent struct {
-	Id                                     uint                           `json:"id"`
-	Title                                  string                         `json:"title"`
-	RouteRevision                          uint                           `json:"routeRevision"`
-	SlotRevision                           uint                           `json:"slotRevision"`
-	Date                                   string                         `json:"date"`
-	CalculationParameters                  simCalculationParameters       `json:"calculationParameters"`
-	Airports                               []simAirport                   `json:"airports"`
-	Waypoints                              []simWaypoint                  `json:"waypoints"`
-	RouteSegments                          []simRouteSegment              `json:"routeSegments"`
-	Sectors                                []simSector                    `json:"sectors"`
-	TagLimits                              []simTagLimit                  `json:"tagLimits"`
-	Slots                                  []simSlot                      `json:"slots"`
-	AirportPairDepartureWindowShiftingsIds map[int64]map[int64][2]float64 `json:"airportPairDepartureTimeWindowShiftingsIds"`
+	Id                                         uint                           `json:"id"`
+	Title                                      string                         `json:"title"`
+	RouteRevision                              uint                           `json:"routeRevision"`
+	SlotRevision                               uint                           `json:"slotRevision"`
+	Date                                       string                         `json:"date"`
+	CalculationParameters                      simCalculationParameters       `json:"calculationParameters"`
+	Airports                                   []simAirport                   `json:"airports"`
+	Waypoints                                  []simWaypoint                  `json:"waypoints"`
+	RouteSegments                              []simRouteSegment              `json:"routeSegments"`
+	Sectors                                    []simSector                    `json:"sectors"`
+	TagLimits                                  []simTagLimit                  `json:"tagLimits"`
+	Slots                                      []simSlot                      `json:"slots"`
+	AirportPairDepartureTimeWindowShiftingsIds map[int64]map[int64][2]float64 `json:"airportPairDepartureTimeWindowShiftingsIds"`
 }
 
 type simTime struct {
