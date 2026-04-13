@@ -115,6 +115,7 @@ func main() {
 	api.Get("/events/:eventId/slot-revisions", handlers.ListSlotRevisions)
 	api.Post("/events/:eventId/slot-revisions", handlers.CreateSlotRevision)
 	api.Get("/events/:eventId/slot-revisions/latest", handlers.GetLatestSlotRevision)
+	api.Get("/events/:eventId/slot-revisions/latest/export", handlers.ExportLatestSlotRevisionCSV)
 	api.Get("/events/:eventId/slot-revisions/:number", handlers.GetSlotRevision)
 	api.Put("/slot-revisions/:revisionId", handlers.UpdateSlotRevision)
 	api.Delete("/slot-revisions/:revisionId", handlers.DeleteSlotRevision)
