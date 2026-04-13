@@ -3,7 +3,6 @@ package handlers
 import (
 	"fmt"
 	"math/rand"
-	"regexp"
 	"strconv"
 	"strings"
 
@@ -77,24 +76,24 @@ func ExportLatestSlotRevisionCSV(c fiber.Ctx) error {
 	rng := rand.New(rand.NewSource(int64(revision.ID)))
 
 	var b strings.Builder
-	b.WriteString("id,departure,arrival,tot,is_domestic,track,route,,selcal\n")
+	b.WriteString("id,departure,arrival,tot,is_domestic,track,route,level,selcal\n")
 
 	for _, s := range revision.Slots {
 		dep := s.DepartureAirport.Waypoint.Identifier
 		arr := s.ArrivalAirport.Waypoint.Identifier
-		tot := s.DepartureTime.UTC().Format("1504")
+		tot := s.DepartureTime.UTC().Format("2006-01-02 15:04:05")
 
 		var track string
 		routeParts := make([]string, 0, len(s.RouteSegments))
 		for _, rs := range s.RouteSegments {
 			if rs.RouteSegmentGroup == "OCA" && track == "" {
-				track = cleanTrackName(rs.Identifier)
+				track = rs.Identifier
 			}
 			if rs.RouteString != "" {
 				routeParts = append(routeParts, rs.RouteString)
 			}
 		}
-		route := strings.Join(routeParts, " ")
+		route := dedupeConsecutive(strings.Join(routeParts, " "))
 		selcal := generateSelcal(used, rng)
 
 		fmt.Fprintf(&b, "%d,%s,%s,%s,false,%s,%s,,%s\n",
@@ -107,10 +106,15 @@ func ExportLatestSlotRevisionCSV(c fiber.Ctx) error {
 	return c.SendString(b.String())
 }
 
-var bracketRe = regexp.MustCompile(`[\(\[][^\)\]]*[\)\]]`)
-
-func cleanTrackName(s string) string {
-	return strings.TrimSpace(bracketRe.ReplaceAllString(s, ""))
+func dedupeConsecutive(route string) string {
+	tokens := strings.Fields(route)
+	out := tokens[:0:0]
+	for _, t := range tokens {
+		if len(out) == 0 || out[len(out)-1] != t {
+			out = append(out, t)
+		}
+	}
+	return strings.Join(out, " ")
 }
 
 func csvEscape(s string) string {
