@@ -154,7 +154,7 @@ type simEvent struct {
 	Sectors                                []simSector                    `json:"sectors"`
 	TagLimits                              []simTagLimit                  `json:"tagLimits"`
 	Slots                                  []simSlot                      `json:"slots"`
-	AirportPairDepartureWindowShiftingsIds map[int64]map[int64][2]float64 `json:"airportPairDepartureWindowShiftingsIds"`
+	AirportPairDepartureWindowShiftingsIds map[int64]map[int64][2]float64 `json:"airportPairDepartureTimeWindowShiftingsIds"`
 }
 
 type simTime struct {

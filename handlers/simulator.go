@@ -353,13 +353,13 @@ func buildSimEvent(event models.VATSIMEvent, revision *models.SlotRevision, incl
 			HighSimulationAccuracy:                                event.HighSimulationAccuracy,
 			DepartureTimeWindowLength:                             formatDepartureTimeWindow(event.DepartureTimeWindow),
 		},
-		Airports:                                 airports,
-		Waypoints:                                waypoints,
-		RouteSegments:                            routeSegments,
-		Sectors:                                  sectors,
-		TagLimits:                                tagLimits,
-		Slots:                                    slots,
-		AirportPairDepartureWindowShiftingsIds:   shiftingsMap,
+		Airports:      airports,
+		Waypoints:     waypoints,
+		RouteSegments: routeSegments,
+		Sectors:       sectors,
+		TagLimits:     tagLimits,
+		Slots:         slots,
+		AirportPairDepartureTimeWindowShiftingsIds: shiftingsMap,
 	}
 }
 
@@ -792,7 +792,6 @@ func saveCalculationResult(eventID uint, resp simResponseEvent, commentary strin
 	}
 	return revisionID, 0, err
 }
-
 
 func invokeSimulator(c fiber.Ctx, path string, includeSlots bool, save func(uint, simResponseEvent, string) (uint, uint, error)) error {
 	if config.C.SimulatorURL == "" {
