@@ -186,26 +186,12 @@ func buildSimEvent(event models.VATSIMEvent, revision *models.SlotRevision, incl
 
 	airports := make([]simAirport, 0, len(event.Airports))
 	airportWaypointIDs := make(map[int64]bool, len(event.Airports))
-	// Map DB airport ID -> waypoint ID for deferred pair conversion
+	// Map DB airport ID -> waypoint ID for shift translation
 	dbToWaypoint := make(map[int64]int64, len(event.Airports))
 	for _, a := range event.Airports {
 		airports = append(airports, mapAirport(a))
 		airportWaypointIDs[a.WaypointID] = true
 		dbToWaypoint[int64(a.ID)] = a.WaypointID
-	}
-
-	// Load departure pair preferences from the database
-	var dbPrefs []models.DeparturePairPreference
-	database.DB.Where("event_id = ?", event.ID).Find(&dbPrefs)
-	deferredPairs := make([][]int64, 0)
-	preferredPairs := make([][]int64, 0)
-	for _, p := range dbPrefs {
-		waypointPair := []int64{int64(p.DepartureAirportID), int64(p.ArrivalAirportID)}
-		if p.Preference == models.PreferenceDeferred {
-			deferredPairs = append(deferredPairs, waypointPair)
-		} else if p.Preference == models.PreferencePreferred {
-			preferredPairs = append(preferredPairs, waypointPair)
-		}
 	}
 
 	waypointByID := make(map[int64]simWaypoint)
@@ -330,37 +316,29 @@ func buildSimEvent(event models.VATSIMEvent, revision *models.SlotRevision, incl
 		}
 	}
 
-	// Convert deferred pairs from DB airport IDs to waypoint IDs
-	convertedDeferredPairs := make([][]int64, 0, len(deferredPairs))
-	for _, pair := range deferredPairs {
-		if len(pair) == 2 {
-			dw, dok := dbToWaypoint[pair[0]]
-			aw, aok := dbToWaypoint[pair[1]]
+	// Build airport pair departure window shiftings from the revision
+	shiftingsMap := make(map[int64]map[int64][2]float64)
+	if revision != nil {
+		var shifts []models.AirportPairDepartureWindowShift
+		database.DB.Where("slot_revision_id = ?", revision.ID).Find(&shifts)
+		for _, s := range shifts {
+			dw, dok := dbToWaypoint[int64(s.DepartureAirportID)]
+			aw, aok := dbToWaypoint[int64(s.ArrivalAirportID)]
 			if dok && aok {
-				convertedDeferredPairs = append(convertedDeferredPairs, []int64{dw, aw})
-			}
-		}
-	}
-
-	// Convert preferred pairs from DB airport IDs to waypoint IDs
-	convertedPreferredPairs := make([][]int64, 0, len(preferredPairs))
-	for _, pair := range preferredPairs {
-		if len(pair) == 2 {
-			dw, dok := dbToWaypoint[pair[0]]
-			aw, aok := dbToWaypoint[pair[1]]
-			if dok && aok {
-				convertedPreferredPairs = append(convertedPreferredPairs, []int64{dw, aw})
+				if shiftingsMap[dw] == nil {
+					shiftingsMap[dw] = make(map[int64][2]float64)
+				}
+				shiftingsMap[dw][aw] = [2]float64{s.StartShiftHours, s.EndShiftHours}
 			}
 		}
 	}
 
 	return simEvent{
-		Id:                  event.ID,
-		Title:               event.Title,
-		RouteRevision:       event.RouteRevision,
-		SlotRevision:        slotRevisionNumber,
-		Date:                event.Date.Format("2006-01-02"),
-		DepartureTimeWindow: formatDepartureTimeWindow(event.DepartureTimeWindow),
+		Id:            event.ID,
+		Title:         event.Title,
+		RouteRevision: event.RouteRevision,
+		SlotRevision:  slotRevisionNumber,
+		Date:          event.Date.Format("2006-01-02"),
 		CalculationParameters: simCalculationParameters{
 			IntendedSlotGenerationMode:                            uint(event.IntendedSlotGenerationMode),
 			DepartureTimeWindowOffsetSynchronizationLongitude:     event.DepartureTimeWindowOffsetSynchronizationLongitude,
@@ -373,15 +351,15 @@ func buildSimEvent(event models.VATSIMEvent, revision *models.SlotRevision, incl
 			ThresholdToCheckIfAirplaneIsCountedAtWaypointInNm:     event.ThresholdToCheckIfAirplaneIsCountedAtWaypointInNm,
 			CalculationFallbackGroundSpeed:                        event.CalculationFallbackGroundSpeed,
 			HighSimulationAccuracy:                                event.HighSimulationAccuracy,
+			DepartureTimeWindowLength:                             formatDepartureTimeWindow(event.DepartureTimeWindow),
 		},
-		Airports:                  airports,
-		Waypoints:                 waypoints,
-		RouteSegments:             routeSegments,
-		Sectors:                   sectors,
-		TagLimits:                 tagLimits,
-		Slots:                     slots,
-		DeferredDeparturePairIds:  convertedDeferredPairs,
-		PreferredDeparturePairIds: convertedPreferredPairs,
+		Airports:                                 airports,
+		Waypoints:                                waypoints,
+		RouteSegments:                            routeSegments,
+		Sectors:                                  sectors,
+		TagLimits:                                tagLimits,
+		Slots:                                    slots,
+		AirportPairDepartureWindowShiftingsIds:   shiftingsMap,
 	}
 }
 
@@ -1100,7 +1078,7 @@ func SimulateSlots(c fiber.Ctx) error {
 }
 
 // prepareSimulationRevision creates a new slot revision for the event and copies
-// draft entries + draft commentary from the previous revision.
+// draft entries + window shifts from the previous revision.
 func prepareSimulationRevision(eventID uint64) (uint, uint, error) {
 	var revisionID uint
 	var revisionNumber uint
@@ -1109,10 +1087,12 @@ func prepareSimulationRevision(eventID uint64) (uint, uint, error) {
 		// Find the previous revision (if any) to copy draft data from.
 		var prevRevision models.SlotRevision
 		var draftEntries []models.SlotDraftEntry
+		var windowShifts []models.AirportPairDepartureWindowShift
 		hasPrev := false
 		if err := tx.Where("event_id = ?", eventID).Order("number DESC").First(&prevRevision).Error; err == nil {
 			hasPrev = true
 			tx.Where("slot_revision_id = ?", prevRevision.ID).Find(&draftEntries)
+			tx.Where("slot_revision_id = ?", prevRevision.ID).Find(&windowShifts)
 		}
 
 		// Determine the next revision number.
@@ -1122,10 +1102,6 @@ func prepareSimulationRevision(eventID uint64) (uint, uint, error) {
 		revision := models.SlotRevision{
 			EventID: uint(eventID),
 			Number:  maxNumber + 1,
-		}
-		// Carry forward the slot planner draft commentary.
-		if hasPrev {
-			revision.SlotPlannerDraftCommentary = prevRevision.SlotPlannerDraftCommentary
 		}
 		if err := tx.Create(&revision).Error; err != nil {
 			return err
@@ -1144,6 +1120,19 @@ func prepareSimulationRevision(eventID uint64) (uint, uint, error) {
 			}
 			log.Info().Int("copied", len(draftEntries)).Uint("revisionId", revision.ID).
 				Msg("[prepareSimulationRevision] copied draft entries to new revision")
+		}
+
+		// Copy window shifts to the new revision.
+		if hasPrev && len(windowShifts) > 0 {
+			for i := range windowShifts {
+				windowShifts[i].ID = 0
+				windowShifts[i].SlotRevisionID = revision.ID
+			}
+			if err := tx.Create(&windowShifts).Error; err != nil {
+				return fmt.Errorf("failed to copy window shifts: %w", err)
+			}
+			log.Info().Int("copied", len(windowShifts)).Uint("revisionId", revision.ID).
+				Msg("[prepareSimulationRevision] copied window shifts to new revision")
 		}
 
 		return nil

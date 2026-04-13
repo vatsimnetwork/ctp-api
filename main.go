@@ -93,9 +93,6 @@ func main() {
 	api.Get("/events/:id/slot-positions", handlers.GetSlotPositionsAtTime)
 	api.Get("/events/:id/slot-positions/all", handlers.GetAllSlotPositions)
 
-	api.Get("/events/:eventId/departure-pair-preferences", handlers.ListDeparturePairPreferences)
-	api.Put("/events/:eventId/departure-pair-preferences", handlers.SetDeparturePairPreferences)
-
 	api.Get("/events/:eventId/airports", handlers.ListAirports)
 	api.Post("/events/:eventId/airports", handlers.CreateAirport)
 	api.Put("/airports/:id", handlers.UpdateAirport)
@@ -126,7 +123,9 @@ func main() {
 	api.Post("/slot-revisions/:revisionId/throughput-snapshots", handlers.AddThroughputSnapshotsToRevision)
 	api.Get("/slot-revisions/:revisionId/draft-entries", handlers.ListSlotDraftEntries)
 	api.Post("/slot-revisions/:revisionId/draft-entries", handlers.AddSlotDraftEntries)
-	api.Post("/slot-draft-entries/migrate", handlers.MigrateSlotDraftEntries)
+
+	api.Get("/slot-revisions/:revisionId/window-shifts", handlers.ListWindowShifts)
+	api.Put("/slot-revisions/:revisionId/window-shifts", handlers.ReplaceWindowShifts)
 
 	api.Get("/route-segments", handlers.ListAllRouteSegments)
 	api.Get("/events/:eventId/route-segments", handlers.ListEventRouteSegments)

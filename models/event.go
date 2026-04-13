@@ -13,7 +13,7 @@ type VATSIMEvent struct {
 	DepartureTimeWindowOffsetSynchronizationLongitude     float64                                   `gorm:"default:-30" json:"departureTimeWindowOffsetSynchronizationLongitude"`
 	SimulationAnalysisResolutionInMinutes                 uint                                      `gorm:"default:2" json:"simulationAnalysisResolutionInMinutes"`
 	ShouldSimulationUseActualWeatherForecastData          bool                                      `json:"shouldSimulationUseActualWeatherForecastData"`
-	IntendedDepartureTimeWindowOffsetsCalculationMode     DepartureTimeWindowOffsetsCalculationMode `gorm:"default:1" json:"intendedDepartureTimeWindowOffsetsCalculationMode"`
+	IntendedDepartureTimeWindowOffsetsCalculationMode     DepartureTimeWindowOffsetsCalculationMode `gorm:"default:2" json:"intendedDepartureTimeWindowOffsetsCalculationMode"`
 	DepartureTimeWindowOffsetSynchronizationTimeOfDay     string                                    `gorm:"default:'16:00'" json:"departureTimeWindowOffsetSynchronizationTimeOfDay"`
 	CalculateThroughputDataOnlyForManuallyProvidedSectors bool                                      `gorm:"default:true" json:"calculateThroughputDataOnlyForManuallyProvidedSectors"`
 	IntendedWaypointThroughputCalculationMode             WaypointThroughputCalculationMode         `gorm:"default:1" json:"intendedWaypointThroughputCalculationMode"`

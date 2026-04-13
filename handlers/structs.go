@@ -81,6 +81,7 @@ type simCalculationParameters struct {
 	ThresholdToCheckIfAirplaneIsCountedAtWaypointInNm     float64 `json:"thresholdToCheckIfAirplaneIsCountedAtWaypointInNm"`
 	CalculationFallbackGroundSpeed                        float64 `json:"calculationFallbackGroundSpeed"`
 	HighSimulationAccuracy                                bool    `json:"highSimulationAccuracy"`
+	DepartureTimeWindowLength                             string  `json:"departureTimeWindowLength"`
 }
 
 type simWaypoint struct {
@@ -141,21 +142,19 @@ type simTagLimit struct {
 }
 
 type simEvent struct {
-	Id                        uint                     `json:"id"`
-	Title                     string                   `json:"title"`
-	RouteRevision             uint                     `json:"routeRevision"`
-	SlotRevision              uint                     `json:"slotRevision"`
-	Date                      string                   `json:"date"`
-	DepartureTimeWindow       string                   `json:"departureTimeWindow"`
-	CalculationParameters     simCalculationParameters `json:"calculationParameters"`
-	Airports                  []simAirport             `json:"airports"`
-	Waypoints                 []simWaypoint            `json:"waypoints"`
-	RouteSegments             []simRouteSegment        `json:"routeSegments"`
-	Sectors                   []simSector              `json:"sectors"`
-	TagLimits                 []simTagLimit            `json:"tagLimits"`
-	Slots                     []simSlot                `json:"slots"`
-	DeferredDeparturePairIds  [][]int64                `json:"deferredDeparturePairIds"`
-	PreferredDeparturePairIds [][]int64                `json:"preferredDeparturePairIds"`
+	Id                                       uint                                `json:"id"`
+	Title                                    string                              `json:"title"`
+	RouteRevision                            uint                                `json:"routeRevision"`
+	SlotRevision                             uint                                `json:"slotRevision"`
+	Date                                     string                              `json:"date"`
+	CalculationParameters                    simCalculationParameters            `json:"calculationParameters"`
+	Airports                                 []simAirport                        `json:"airports"`
+	Waypoints                                []simWaypoint                       `json:"waypoints"`
+	RouteSegments                            []simRouteSegment                   `json:"routeSegments"`
+	Sectors                                  []simSector                         `json:"sectors"`
+	TagLimits                                []simTagLimit                       `json:"tagLimits"`
+	Slots                                    []simSlot                           `json:"slots"`
+	AirportPairDepartureWindowShiftingsIds   map[int64]map[int64][2]float64      `json:"airportPairDepartureWindowShiftingsIds"`
 }
 
 type simTime struct {
@@ -275,28 +274,4 @@ type SlotDraftEntryInput struct {
 	ArrRouteID         uint `json:"arrRouteId"`
 	ArrivalAirportID   uint `json:"arrivalAirportId"`
 	SlotCount          uint `json:"slotCount"`
-}
-
-type MigrateSlotDraftEntriesResponse struct {
-	Migrated int `json:"migrated"`
-	Skipped  int `json:"skipped"`
-	Errors   int `json:"errors"`
-}
-
-type slotDraftEntryGroupJSON struct {
-	DepAirportID uint `json:"depAirportId"`
-	DepRouteID   uint `json:"depRouteId"`
-	TrackID      uint `json:"trackId"`
-	ArrRouteID   uint `json:"arrRouteId"`
-	ArrAirportID uint `json:"arrAirportId"`
-	Value        uint `json:"value"`
-}
-
-type slotDraftEntryGroup struct {
-	DepAirportID uint
-	DepRouteID   uint
-	TrackID      uint
-	ArrRouteID   uint
-	ArrAirportID uint
-	SlotCount    uint
 }
