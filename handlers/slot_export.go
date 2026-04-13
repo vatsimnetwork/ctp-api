@@ -76,7 +76,7 @@ func ExportLatestSlotRevisionCSV(c fiber.Ctx) error {
 	rng := rand.New(rand.NewSource(int64(revision.ID)))
 
 	var b strings.Builder
-	b.WriteString("id,departure,arrival,tot,is_domestic,track,route,level,selcal\n")
+	b.WriteString("departure,arrival,tot,is_domestic,track,route,level,selcal\n")
 
 	for _, s := range revision.Slots {
 		dep := s.DepartureAirport.Waypoint.Identifier
@@ -96,8 +96,8 @@ func ExportLatestSlotRevisionCSV(c fiber.Ctx) error {
 		route := dedupeConsecutive(strings.Join(routeParts, " "))
 		selcal := generateSelcal(used, rng)
 
-		fmt.Fprintf(&b, "%d,%s,%s,%s,false,%s,%s,,%s\n",
-			s.ID, dep, arr, tot, track, csvEscape(route), selcal)
+		fmt.Fprintf(&b, "%s,%s,%s,false,%s,%s,,%s\n",
+			dep, arr, tot, track, csvEscape(route), selcal)
 	}
 
 	c.Set(fiber.HeaderContentType, "text/csv; charset=utf-8")
