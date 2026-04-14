@@ -1,6 +1,7 @@
 package handlers
 
 import (
+	"encoding/json"
 	"fmt"
 	"log"
 	"strconv"
@@ -383,14 +384,49 @@ func UpdateRouteSegment(c fiber.Ctx) error {
 		return fiber.NewError(fiber.StatusNotFound, "route segment not found")
 	}
 
-	var updates models.RouteSegment
-	if err := c.Bind().JSON(&updates); err != nil {
+	// Detect which fields the client actually sent by parsing the raw JSON body.
+	// Only those fields are persisted — omitted fields keep their existing value.
+	// To intentionally clear a field (e.g. facilities), the client must send it
+	// explicitly with an empty value: {"facilities": ""}.
+	var raw map[string]json.RawMessage
+	if err := json.Unmarshal(c.Body(), &raw); err != nil {
 		return fiber.NewError(fiber.StatusBadRequest, err.Error())
 	}
 
-	updates.ID = uint(id)
-	if err := database.DB.Session(&gorm.Session{FullSaveAssociations: true}).Save(&updates).Error; err != nil {
-		return fiber.NewError(fiber.StatusInternalServerError, err.Error())
+	var updates models.RouteSegment
+	if err := json.Unmarshal(c.Body(), &updates); err != nil {
+		return fiber.NewError(fiber.StatusBadRequest, err.Error())
+	}
+
+	// Whitelist of JSON key → GORM struct field name for updatable scalar columns.
+	// Associations (tags, providedFacilityProgression, locations) are intentionally
+	// excluded — use the batch save endpoint for those.
+	fieldMap := map[string]string{
+		"routeString":            "RouteString",
+		"routeSegmentGroup":      "RouteSegmentGroup",
+		"color":                  "Color",
+		"enabled":                "Enabled",
+		"facilities":             "Facilities",
+		"identifier":             "Identifier",
+		"maximumAircraftPerHour": "MaximumAircraftPerHour",
+		"routeRevision":          "RouteRevision",
+		"eventId":                "EventID",
+	}
+	var selectFields []string
+	for k := range raw {
+		if f, ok := fieldMap[k]; ok {
+			selectFields = append(selectFields, f)
+		}
+	}
+
+	if len(selectFields) > 0 {
+		updates.ID = uint(id)
+		if err := database.DB.Model(&models.RouteSegment{}).
+			Where("id = ?", id).
+			Select(selectFields).
+			Updates(&updates).Error; err != nil {
+			return fiber.NewError(fiber.StatusInternalServerError, err.Error())
+		}
 	}
 
 	database.DB.Preload("Tags.TagRef").Preload("Locations.Waypoint").Preload("ProvidedFacilityProgression").First(&existing, id)
