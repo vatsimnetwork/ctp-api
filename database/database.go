@@ -55,8 +55,13 @@ func Connect() {
 		&models.GeoJsonOverlay{},
 		&models.SlotPosition{},
 		&models.AirportPairDepartureWindowShift{},
+		&models.LockSetting{},
 	); err != nil {
 		log.Fatal().Err(err).Msg("automigrate failed")
+	}
+
+	if err := DB.FirstOrCreate(&models.LockSetting{}, models.LockSetting{ID: 1}).Error; err != nil {
+		log.Fatal().Err(err).Msg("failed to seed lock settings")
 	}
 
 	log.Info().Msg("database ready")

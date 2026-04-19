@@ -33,6 +33,7 @@ func main() {
 	config.Load()
 	docs.SwaggerInfo.Host = ""
 	database.Connect()
+	handlers.LoadLockState()
 
 	app := fiber.New(fiber.Config{
 		ErrorHandler: func(c fiber.Ctx, err error) error {
@@ -70,6 +71,9 @@ func main() {
 
 	api := app.Group("/api", middleware.APIKeyAuth())
 
+	api.Get("/locks", handlers.GetLocks)
+	api.Put("/locks", handlers.UpdateLocks)
+
 	api.Get("/events", handlers.ListEvents)
 	api.Post("/events", handlers.CreateEvent)
 	api.Get("/events/:id", handlers.GetEvent)
@@ -86,8 +90,11 @@ func main() {
 	api.Get("/events/:id/charts/arrival/:identifier/fine", handlers.ChartsArrivalFine)
 	api.Get("/events/:id/calculate-slots/preview", handlers.PreviewCalculatePayload)
 	api.Get("/events/:id/simulate-slots/preview", handlers.PreviewSimulatePayload)
-	api.Post("/events/:id/calculate-slots", handlers.CalculateSlots)
-	api.Post("/events/:id/simulate-slots", handlers.SimulateSlots)
+	slotGuard := handlers.SlotLockGuard()
+	routeGuard := handlers.RouteLockGuard()
+
+	api.Post("/events/:id/calculate-slots", slotGuard, handlers.CalculateSlots)
+	api.Post("/events/:id/simulate-slots", slotGuard, handlers.SimulateSlots)
 	api.Get("/events/:id/simulate-status", handlers.GetSimulateStatus)
 	api.Get("/events/:id/latest-simulator-response", handlers.GetLatestSimulatorResponse)
 	api.Get("/events/:id/slot-positions", handlers.GetSlotPositionsAtTime)
@@ -113,29 +120,29 @@ func main() {
 	api.Patch("/events/:eventId/tag-limits", handlers.UpsertEventTagLimits)
 
 	api.Get("/events/:eventId/slot-revisions", handlers.ListSlotRevisions)
-	api.Post("/events/:eventId/slot-revisions", handlers.CreateSlotRevision)
+	api.Post("/events/:eventId/slot-revisions", slotGuard, handlers.CreateSlotRevision)
 	api.Get("/events/:eventId/slot-revisions/latest", handlers.GetLatestSlotRevision)
 	api.Get("/events/:eventId/slot-revisions/latest/export", handlers.ExportLatestSlotRevisionCSV)
 	api.Get("/events/:eventId/slot-revisions/:number", handlers.GetSlotRevision)
-	api.Put("/slot-revisions/:revisionId", handlers.UpdateSlotRevision)
-	api.Delete("/slot-revisions/:revisionId", handlers.DeleteSlotRevision)
-	api.Post("/slot-revisions/:revisionId/slots", handlers.AddSlotsToRevision)
+	api.Put("/slot-revisions/:revisionId", slotGuard, handlers.UpdateSlotRevision)
+	api.Delete("/slot-revisions/:revisionId", slotGuard, handlers.DeleteSlotRevision)
+	api.Post("/slot-revisions/:revisionId/slots", slotGuard, handlers.AddSlotsToRevision)
 	api.Post("/slot-revisions/:revisionId/throughput-states", handlers.AddThroughputStatesToRevision)
 	api.Post("/slot-revisions/:revisionId/throughput-snapshots", handlers.AddThroughputSnapshotsToRevision)
 	api.Get("/slot-revisions/:revisionId/draft-entries", handlers.ListSlotDraftEntries)
-	api.Post("/slot-revisions/:revisionId/draft-entries", handlers.AddSlotDraftEntries)
+	api.Post("/slot-revisions/:revisionId/draft-entries", slotGuard, handlers.AddSlotDraftEntries)
 
 	api.Get("/slot-revisions/:revisionId/window-shifts", handlers.ListWindowShifts)
 	api.Put("/slot-revisions/:revisionId/window-shifts", handlers.ReplaceWindowShifts)
 
 	api.Get("/route-segments", handlers.ListAllRouteSegments)
 	api.Get("/events/:eventId/route-segments", handlers.ListEventRouteSegments)
-	api.Post("/route-segments", handlers.CreateRouteSegment)
-	api.Post("/route-segments/save", handlers.BatchSaveRouteSegments)
-	api.Post("/route-segments/reparse-facilities", handlers.ReparseAllFacilities)
-	api.Put("/route-segments/:id", handlers.UpdateRouteSegment)
-	api.Patch("/route-segments/:id/capacity", handlers.PatchRouteSegmentCapacity)
-	api.Delete("/route-segments/:id", handlers.DeleteRouteSegment)
+	api.Post("/route-segments", routeGuard, handlers.CreateRouteSegment)
+	api.Post("/route-segments/save", routeGuard, handlers.BatchSaveRouteSegments)
+	api.Post("/route-segments/reparse-facilities", routeGuard, handlers.ReparseAllFacilities)
+	api.Put("/route-segments/:id", routeGuard, handlers.UpdateRouteSegment)
+	api.Patch("/route-segments/:id/capacity", routeGuard, handlers.PatchRouteSegmentCapacity)
+	api.Delete("/route-segments/:id", routeGuard, handlers.DeleteRouteSegment)
 
 	api.Get("/airways", handlers.ListAirways)
 	api.Post("/airways", handlers.CreateAirway)
