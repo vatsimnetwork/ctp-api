@@ -94,7 +94,8 @@ func oceanicTrackIdentifier(segments []models.RouteSegment, orders map[uint]uint
 // ---- CSV output ----
 
 // buildBookingCSV produces a CSV string from the processed booking rows.
-func buildBookingCSV(rows []bookingRow) string {
+// When includeCid is false, the VATSIM ID column is present but empty.
+func buildBookingCSV(rows []bookingRow, includeCid bool) string {
 	var buf bytes.Buffer
 	w := csv.NewWriter(&buf)
 
@@ -104,9 +105,13 @@ func buildBookingCSV(rows []bookingRow) string {
 		"Domestic flight", "SELCAL code",
 	})
 
+	vatsimID := ""
 	for _, r := range rows {
+		if includeCid {
+			vatsimID = r.vatsimID
+		}
 		_ = w.Write([]string{
-			r.id, r.vatsimID, r.departure, r.arrival,
+			r.id, vatsimID, r.departure, r.arrival,
 			r.oceanicTrack, r.route, r.takeOffTime, r.flightLevel,
 			r.domesticFlight, r.selcalCode,
 		})
@@ -181,6 +186,7 @@ func parseBookingCSV(r io.Reader) ([]bookingRow, error) {
 //	@Param		file		formData	file	true	"Booking CSV file"
 //	@Param		domestic	query		bool	false	"Set Domestic flight to false for all rows"
 //	@Param		selcal		query		bool	false	"Generate unique valid SELCAL codes"
+//	@Param		includeCid	query		bool	false	"Include VATSIM ID column in output (default: true)"
 //	@Param		format		query		string	false	"Response format: 'json' (default) or 'file'"
 //	@Success	200		{object}	map[string]interface{}	"JSON with csv string, match stats, unmatched IDs"
 //	@Failure	400		{object}	models.ErrorResponse
@@ -194,6 +200,7 @@ func ImportBookingCSV(c fiber.Ctx) error {
 
 	domesticFlag := strings.EqualFold(c.Query("domestic"), "true")
 	selcalFlag := strings.EqualFold(c.Query("selcal"), "true")
+	includeCidFlag := !strings.EqualFold(c.Query("includeCid"), "false")
 
 	// --- Read uploaded file ---
 	fileHeader, err := c.FormFile("file")
@@ -411,7 +418,7 @@ func ImportBookingCSV(c fiber.Ctx) error {
 	}
 
 	// --- Build output CSV ---
-	csvStr := buildBookingCSV(rows)
+	csvStr := buildBookingCSV(rows, includeCidFlag)
 
 	if len(warnings) > 0 {
 		log.Warn().Strs("warnings", warnings).Msg("booking import completed with warnings")
@@ -450,6 +457,7 @@ func ImportBookingCSV(c fiber.Ctx) error {
 //	@Param		eventId	path	int		true	"Event ID"
 //	@Param		domestic	query	bool	false	"Set Domestic flight to false for all rows"
 //	@Param		selcal		query	bool	false	"Generate unique valid SELCAL codes"
+//	@Param		includeCid	query	bool	false	"Include VATSIM ID column in output (default: true)"
 //	@Param		format		query	string	false	"Response format: 'json' (default) or 'file'"
 //	@Success	200		{object}	map[string]interface{}	"JSON with csv string, match stats, unmatched IDs"
 //	@Failure	400		{object}	models.ErrorResponse
@@ -463,6 +471,7 @@ func ImportBookingFromNattrak(c fiber.Ctx) error {
 
 	domesticFlag := strings.EqualFold(c.Query("domestic"), "true")
 	selcalFlag := strings.EqualFold(c.Query("selcal"), "true")
+	includeCidFlag := !strings.EqualFold(c.Query("includeCid"), "false")
 
 	resp, err := http.Get("https://ctp.vatsim.net/api/bookings-nattrak")
 	if err != nil {
@@ -712,7 +721,7 @@ func ImportBookingFromNattrak(c fiber.Ctx) error {
 		}
 	}
 
-	csvStr := buildBookingCSV(rows)
+	csvStr := buildBookingCSV(rows, includeCidFlag)
 
 	if len(warnings) > 0 {
 		log.Warn().Strs("warnings", warnings).Msg("nattrak import completed with warnings")
@@ -723,7 +732,7 @@ func ImportBookingFromNattrak(c fiber.Ctx) error {
 		idJ, _ := strconv.ParseUint(rows[j].id, 10, 64)
 		return idI < idJ
 	})
-	csvStr = buildBookingCSV(rows)
+	csvStr = buildBookingCSV(rows, includeCidFlag)
 
 	if strings.EqualFold(c.Query("format"), "file") {
 		c.Set(fiber.HeaderContentType, "text/csv; charset=utf-8")
