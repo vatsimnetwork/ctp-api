@@ -310,6 +310,7 @@ func ImportBookingCSV(c fiber.Ctx) error {
 					warnings = append(warnings, fmt.Sprintf(
 						"row %s: existing mapping references slot %d which no longer exists", ref.row.id, existing.SlotID))
 				} else {
+					sortSlotRouteSegments([]models.Slot{slot})
 					track := oceanicTrackIdentifier(slot.RouteSegments, orderBySlot[slot.ID])
 					route := combineRouteStrings(slot.RouteSegments)
 					ref.row.oceanicTrack = track
@@ -616,6 +617,7 @@ func ImportBookingFromNattrak(c fiber.Ctx) error {
 						"row %s: existing mapping references slot %d which no longer exists", ref.row.id, existing.SlotID))
 					continue
 				}
+				sortSlotRouteSegments([]models.Slot{slot})
 				track := oceanicTrackIdentifier(slot.RouteSegments, orderBySlot[slot.ID])
 				route := combineRouteStrings(slot.RouteSegments)
 				ref.row.oceanicTrack = track
