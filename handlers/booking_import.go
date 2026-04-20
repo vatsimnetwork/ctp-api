@@ -498,8 +498,8 @@ func ImportBookingFromNattrak(c fiber.Ctx) error {
 			totTime = totTime[len(totTime)-5:]
 		}
 
-		domestic := "true"
-		if !nb.IsDomestic {
+		domestic := ""
+		if c.Query("domestic") != "" {
 			domestic = "false"
 		}
 
