@@ -323,3 +323,21 @@ type bookingMatchResult struct {
 	track     string
 	route     string
 }
+
+type nattrakBooking struct {
+	ID         uint    `json:"id"`
+	DepID      string  `json:"dep_id"`
+	ArrID      string  `json:"arr_id"`
+	TOT        string  `json:"tot"`
+	Status     string  `json:"status"`
+	IsDomestic bool    `json:"is_domestic"`
+	Route      *string `json:"route"`
+	Level      int     `json:"level"`
+	TrackID    *string `json:"track_id"`
+	UserID     uint    `json:"user_id"`
+	SELCAL     *string `json:"selcal"`
+}
+
+type nattrakResponse struct {
+	Data []nattrakBooking `json:"data"`
+}

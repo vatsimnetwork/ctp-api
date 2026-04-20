@@ -163,6 +163,7 @@ func main() {
 	api.Delete("/geo-json-overlays/:id", handlers.DeleteGeoJsonOverlay)
 
 	api.Post("/events/:eventId/bookings/import", handlers.ImportBookingCSV)
+	api.Get("/events/:eventId/bookings/import/nattrak", handlers.ImportBookingFromNattrak)
 
 	api.Get("/route-revisions", handlers.ListRouteRevisions)
 	api.Post("/route-revisions", handlers.CreateRouteRevision)
