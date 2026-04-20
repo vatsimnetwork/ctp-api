@@ -88,6 +88,30 @@ func oceanicTrackIdentifier(segments []models.RouteSegment, orders map[uint]uint
 	return ""
 }
 
+// ---- CSV output ----
+
+// buildBookingCSV produces a CSV string from the processed booking rows.
+func buildBookingCSV(rows []bookingRow) string {
+	var buf bytes.Buffer
+	w := csv.NewWriter(&buf)
+
+	_ = w.Write([]string{
+		"ID", "VATSIM ID", "Departure field", "Arrival field",
+		"Oceanic track", "Route", "Take-off time", "Flight level",
+		"Domestic flight", "SELCAL code",
+	})
+
+	for _, r := range rows {
+		_ = w.Write([]string{
+			r.id, r.vatsimID, r.departure, r.arrival,
+			r.oceanicTrack, r.route, r.takeOffTime, r.flightLevel,
+			r.domesticFlight, r.selcalCode,
+		})
+	}
+	w.Flush()
+	return buf.String()
+}
+
 // ---- CSV parsing ----
 
 func parseBookingCSV(r io.Reader) ([]bookingRow, error) {
@@ -144,14 +168,17 @@ func parseBookingCSV(r io.Reader) ([]bookingRow, error) {
 //	@Description	in the latest slot revision by city pair + departure time, and
 //	@Description	fills in the Oceanic Track and Route columns. A mapping of
 //	@Description	booking ID → slot ID is persisted for reproducibility.
+//	@Description	Use format=file to get the result as a downloadable CSV file,
+//	@Description	or omit/set format=json for a JSON response with match stats.
 //	@Tags		bookings
 //	@Security	ApiKeyAuth
 //	@Accept		multipart/form-data
-//	@Produce	json
+//	@Produce	json,text/csv
 //	@Param		eventId		path		int		true	"Event ID"
 //	@Param		file		formData	file	true	"Booking CSV file"
 //	@Param		domestic	query		bool	false	"Set Domestic flight to false for all rows"
 //	@Param		selcal		query		bool	false	"Generate unique valid SELCAL codes"
+//	@Param		format		query		string	false	"Response format: 'json' (default) or 'file'"
 //	@Success	200		{object}	map[string]interface{}	"JSON with csv string, match stats, unmatched IDs"
 //	@Failure	400		{object}	models.ErrorResponse
 //	@Failure	404		{object}	models.ErrorResponse
@@ -344,28 +371,18 @@ func ImportBookingCSV(c fiber.Ctx) error {
 	}
 
 	// --- Build output CSV ---
-	var buf bytes.Buffer
-	w := csv.NewWriter(&buf)
-
-	// Write BOM + header (match input format exactly).
-	_ = w.Write([]string{
-		"\ufeffID", "VATSIM ID", "Departure field", "Arrival field",
-		"Oceanic track", "Route", "Take-off time", "Flight level",
-		"Domestic flight", "SELCAL code",
-	})
-
-	// Rows in original order.
-	for _, r := range rows {
-		_ = w.Write([]string{
-			r.id, r.vatsimID, r.departure, r.arrival,
-			r.oceanicTrack, r.route, r.takeOffTime, r.flightLevel,
-			r.domesticFlight, r.selcalCode,
-		})
-	}
-	w.Flush()
+	csvStr := buildBookingCSV(rows)
 
 	if len(warnings) > 0 {
 		log.Warn().Strs("warnings", warnings).Msg("booking import completed with warnings")
+	}
+
+	// --- Return file or JSON ---
+	if strings.EqualFold(c.Query("format"), "file") {
+		c.Set(fiber.HeaderContentType, "text/csv; charset=utf-8")
+		c.Set(fiber.HeaderContentDisposition,
+			fmt.Sprintf(`attachment; filename="bookings-event%d.csv"`, eventID))
+		return c.SendString(csvStr)
 	}
 
 	return c.JSON(fiber.Map{
@@ -374,6 +391,6 @@ func ImportBookingCSV(c fiber.Ctx) error {
 		"unmatched":    len(unmatchedIDs),
 		"unmatchedIds": unmatchedIDs,
 		"warnings":     warnings,
-		"csv":          buf.String(),
+		"csv":          csvStr,
 	})
 }
