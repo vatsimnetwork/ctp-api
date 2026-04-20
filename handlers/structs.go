@@ -284,3 +284,42 @@ type WindowShiftInput struct {
 	StartShiftHours    float64 `json:"startShiftHours"`
 	EndShiftHours      float64 `json:"endShiftHours"`
 }
+
+// --- Booking Import ---
+
+type bookingRow struct {
+	idx            int
+	id             string
+	vatsimID       string
+	departure      string
+	arrival        string
+	oceanicTrack   string
+	route          string
+	takeOffTime    string
+	flightLevel    string
+	domesticFlight string
+	selcalCode     string
+}
+
+type cityPair struct {
+	dep string
+	arr string
+}
+
+type bookingSlotInfo struct {
+	slot     models.Slot
+	orderMap map[uint]uint
+	used     bool
+}
+
+type csvSlotRef struct {
+	rowIdx int
+	row    *bookingRow
+}
+
+type bookingMatchResult struct {
+	bookingID uint
+	slotID    uint
+	track     string
+	route     string
+}

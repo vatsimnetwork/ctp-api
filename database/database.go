@@ -56,6 +56,7 @@ func Connect() {
 		&models.SlotPosition{},
 		&models.AirportPairDepartureWindowShift{},
 		&models.LockSetting{},
+		&models.BookingSlotMapping{},
 	); err != nil {
 		log.Fatal().Err(err).Msg("automigrate failed")
 	}

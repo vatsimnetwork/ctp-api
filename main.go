@@ -162,6 +162,8 @@ func main() {
 	api.Post("/geo-json-overlays", handlers.UpsertGeoJsonOverlay)
 	api.Delete("/geo-json-overlays/:id", handlers.DeleteGeoJsonOverlay)
 
+	api.Post("/events/:eventId/bookings/import", handlers.ImportBookingCSV)
+
 	api.Get("/route-revisions", handlers.ListRouteRevisions)
 	api.Post("/route-revisions", handlers.CreateRouteRevision)
 	api.Get("/route-revisions/:number", handlers.GetRouteRevision)
