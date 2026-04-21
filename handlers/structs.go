@@ -107,6 +107,7 @@ type simAirport struct {
 type simSector struct {
 	Id                     uint   `json:"id"`
 	Identifier             string `json:"identifier"`
+	Datasource             string `json:"datasource"`
 	MaximumAircraftPerHour uint16 `json:"maximumAircraftPerHour"`
 	MaximumSlots           uint16 `json:"maximumSlots"`
 }

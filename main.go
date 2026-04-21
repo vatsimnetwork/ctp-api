@@ -95,7 +95,7 @@ func main() {
 	routeGuard := handlers.RouteLockGuard()
 
 	api.Post("/events/:id/calculate-slots", slotGuard, handlers.CalculateSlots)
-	api.Post("/events/:id/simulate-slots", slotGuard, handlers.SimulateSlots)
+	api.Post("/events/:id/simulate-slots", handlers.SimulateSlots)
 	api.Get("/events/:id/simulate-status", handlers.GetSimulateStatus)
 	api.Get("/events/:id/latest-simulator-response", handlers.GetLatestSimulatorResponse)
 	api.Get("/events/:id/slot-positions", handlers.GetSlotPositionsAtTime)

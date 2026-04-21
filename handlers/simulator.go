@@ -981,6 +981,7 @@ func CalculateSlots(c fiber.Ctx) error {
 //	@Success	200	{object}	object	"{ slotRevisionId: uint, draftRevisionNumber?: uint }"
 //	@Failure	400	{object}	models.ErrorResponse
 //	@Failure	404	{object}	models.ErrorResponse
+//	@Failure	423	{object}	models.ErrorResponse
 //	@Failure	502	{object}	models.ErrorResponse
 //	@Failure	503	{object}	models.ErrorResponse
 //	@Router		/events/{id}/simulate-slots [post]
@@ -994,20 +995,51 @@ func SimulateSlots(c fiber.Ctx) error {
 		return fiber.NewError(fiber.StatusBadRequest, "invalid event id")
 	}
 
-	// Step 1: Create a new revision and copy draft entries from the previous one.
-	revisionID, revisionNumber, err := prepareSimulationRevision(id)
+	// Step 0: Check lock status and offset calculation mode.
+	// When locked with offset calculation mode None, we can still simulate
+	// for throughput data only without modifying slots or creating revisions.
+	eventForLockCheck, _, err := fetchSimulatorData(id)
 	if err != nil {
-		return fiber.NewError(fiber.StatusInternalServerError, "failed to prepare revision: "+err.Error())
+		return err
 	}
-	log.Info().Uint("revisionId", revisionID).Uint("revisionNumber", revisionNumber).Uint64("eventId", id).
-		Msg("[SimulateSlots] created new revision with draft entries")
-
-	// Step 2: Create actual slots from draft entries on the new revision.
-	if err := ensureSlotsFromDraftEntries(id); err != nil {
-		log.Error().Err(err).Uint64("eventId", id).Msg("[SimulateSlots] failed to create slots from draft entries")
+	lockedModeNone := false
+	if IsSlotLocked() && eventForLockCheck.IntendedDepartureTimeWindowOffsetsCalculationMode != models.DepartureTimeWindowOffsetsCalculationModeNone {
+		return fiber.NewError(fiber.StatusLocked, "slot modifications are currently locked")
+	}
+	if IsSlotLocked() && eventForLockCheck.IntendedDepartureTimeWindowOffsetsCalculationMode == models.DepartureTimeWindowOffsetsCalculationModeNone {
+		lockedModeNone = true
+		log.Info().Uint64("eventId", id).Msg("[SimulateSlots] lock active but mode is None, running throughput-only simulation")
 	}
 
-	// Step 3: Fetch data (will pick up the new revision as latest) and call the simulator.
+	var revisionID uint
+	var revisionNumber uint
+
+	if lockedModeNone {
+		// Use existing latest revision - don't create a new one.
+		var existingRevision models.SlotRevision
+		if err := database.DB.Where("event_id = ?", id).Order("number DESC").First(&existingRevision).Error; err != nil {
+			return fiber.NewError(fiber.StatusInternalServerError, "failed to find existing revision: "+err.Error())
+		}
+		revisionID = existingRevision.ID
+		revisionNumber = existingRevision.Number
+		log.Info().Uint("revisionId", revisionID).Uint("revisionNumber", revisionNumber).Uint64("eventId", id).
+			Msg("[SimulateSlots] using existing revision (locked mode none)")
+	} else {
+		// Step 1: Create a new revision and copy draft entries from the previous one.
+		revisionID, revisionNumber, err = prepareSimulationRevision(id)
+		if err != nil {
+			return fiber.NewError(fiber.StatusInternalServerError, "failed to prepare revision: "+err.Error())
+		}
+		log.Info().Uint("revisionId", revisionID).Uint("revisionNumber", revisionNumber).Uint64("eventId", id).
+			Msg("[SimulateSlots] created new revision with draft entries")
+
+		// Step 2: Create actual slots from draft entries on the new revision.
+		if err := ensureSlotsFromDraftEntries(id); err != nil {
+			log.Error().Err(err).Uint64("eventId", id).Msg("[SimulateSlots] failed to create slots from draft entries")
+		}
+	}
+
+	// Step 3: Fetch data (will pick up the new/latest revision as latest) and call the simulator.
 	event, revision, err := fetchSimulatorData(id)
 	if err != nil {
 		return err
@@ -1067,7 +1099,8 @@ func SimulateSlots(c fiber.Ctx) error {
 	commentary := strings.Join(simResp.CalculationParameters.SimulationOutputComments, "\n")
 
 	// Step 4: Update existing slots on the revision with times from the simulator response.
-	if err := updateSimulationSlots(uint(id), revisionID, simResp, commentary); err != nil {
+	// When lockedModeNone is true, skip slot time updates but still write throughput data.
+	if err := updateSimulationSlots(uint(id), revisionID, simResp, commentary, lockedModeNone); err != nil {
 		simStatusStore.Delete(id)
 		return fiber.NewError(fiber.StatusInternalServerError, "failed to save simulator results: "+err.Error())
 	}
@@ -1148,11 +1181,13 @@ func prepareSimulationRevision(eventID uint64) (uint, uint, error) {
 
 // updateSimulationSlots updates the existing slots on the given revision with
 // departure/arrival times from the simulator response, then writes throughput data.
-func updateSimulationSlots(eventID, revisionID uint, resp simResponseEvent, commentary string) error {
+// When skipSlotUpdates is true, slot times are not updated but throughput data is still written.
+func updateSimulationSlots(eventID, revisionID uint, resp simResponseEvent, commentary string, skipSlotUpdates bool) error {
 	log.Info().
 		Uint("eventId", eventID).
 		Uint("revisionId", revisionID).
 		Int("slotsInResponse", len(resp.Slots)).
+		Bool("skipSlotUpdates", skipSlotUpdates).
 		Msg("[updateSimulationSlots] starting")
 
 	err := database.DB.Transaction(func(tx *gorm.DB) error {
@@ -1163,16 +1198,18 @@ func updateSimulationSlots(eventID, revisionID uint, resp simResponseEvent, comm
 			return fmt.Errorf("failed to update revision commentary: %w", err)
 		}
 
-		// Update each existing slot with the simulator's computed times.
-		for _, s := range resp.Slots {
-			if s.Id == 0 {
-				continue
-			}
-			if err := tx.Model(&models.Slot{}).Where("id = ? AND slot_revision_id = ?", s.Id, revisionID).Updates(map[string]interface{}{
-				"departure_time":         s.DepartureTime.Time,
-				"projected_arrival_time": s.ProjectedArrivalTime.Time,
-			}).Error; err != nil {
-				log.Error().Err(err).Uint("slotId", s.Id).Msg("[updateSimulationSlots] failed to update slot")
+		// Update each existing slot with the simulator's computed times (unless skipped).
+		if !skipSlotUpdates {
+			for _, s := range resp.Slots {
+				if s.Id == 0 {
+					continue
+				}
+				if err := tx.Model(&models.Slot{}).Where("id = ? AND slot_revision_id = ?", s.Id, revisionID).Updates(map[string]interface{}{
+					"departure_time":         s.DepartureTime.Time,
+					"projected_arrival_time": s.ProjectedArrivalTime.Time,
+				}).Error; err != nil {
+					log.Error().Err(err).Uint("slotId", s.Id).Msg("[updateSimulationSlots] failed to update slot")
+				}
 			}
 		}
 
