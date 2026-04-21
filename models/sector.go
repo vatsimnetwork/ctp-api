@@ -4,15 +4,16 @@ type Sector struct {
 	ThroughputPoint
 	SectorBoundaries []SectorBoundary `gorm:"foreignKey:SectorID;constraint:OnDelete:CASCADE;" json:"sectorBoundaries,omitempty"`
 	EventID          *uint            `gorm:"index" json:"eventId,omitempty"`
+	Datasource       string           `json:"datasource"`
 }
 
 type SectorBoundary struct {
-	ID           uint                      `gorm:"primaryKey" json:"id"`
-	SectorID     uint                      `gorm:"index;not null" json:"sectorId"`
-	MaxLatitude  float64                   `json:"maxLatitude"`
-	MinLatitude  float64                   `json:"minLatitude"`
-	MaxLongitude float64                   `json:"maxLongitude"`
-	MinLongitude float64                   `json:"minLongitude"`
+	ID           uint                       `gorm:"primaryKey" json:"id"`
+	SectorID     uint                       `gorm:"index;not null" json:"sectorId"`
+	MaxLatitude  float64                    `json:"maxLatitude"`
+	MinLatitude  float64                    `json:"minLatitude"`
+	MaxLongitude float64                    `json:"maxLongitude"`
+	MinLongitude float64                    `json:"minLongitude"`
 	Coordinates  []SectorBoundaryCoordinate `gorm:"foreignKey:SectorBoundaryID;constraint:OnDelete:CASCADE;" json:"coordinates,omitempty"`
 }
 

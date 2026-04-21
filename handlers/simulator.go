@@ -234,27 +234,26 @@ func buildSimEvent(event models.VATSIMEvent, revision *models.SlotRevision, incl
 	}
 
 	sectorByID := make(map[uint]simSector)
-	for _, r := range event.RouteSegments {
-		for _, s := range r.ProvidedFacilityProgression {
-			if _, exists := sectorByID[s.ID]; !exists {
-				// 65535 means unlimited (sentinel); pin at 65535 if computed exceeds it.
-				var maxSlots uint16
-				if s.MaximumAircraftPerHour >= 65535 {
-					maxSlots = 65535
-				} else {
-					computed := uint32(float64(s.MaximumAircraftPerHour) * departureHours)
-					if computed > 65535 {
-						computed = 65535
-					}
-					maxSlots = uint16(computed)
-				}
-				sectorByID[s.ID] = simSector{
-					Id:                     s.ID,
-					Identifier:             s.Identifier,
-					MaximumAircraftPerHour: s.MaximumAircraftPerHour,
-					MaximumSlots:           maxSlots,
-				}
+	for _, s := range event.Sectors {
+		if _, exists := sectorByID[s.ID]; exists {
+			continue
+		}
+		var maxSlots uint16
+		if s.MaximumAircraftPerHour >= 65535 {
+			maxSlots = 65535
+		} else {
+			computed := uint32(float64(s.MaximumAircraftPerHour) * departureHours)
+			if computed > 65535 {
+				computed = 65535
 			}
+			maxSlots = uint16(computed)
+		}
+		sectorByID[s.ID] = simSector{
+			Id:                     s.ID,
+			Identifier:             s.Identifier,
+			Datasource:             s.Datasource,
+			MaximumAircraftPerHour: s.MaximumAircraftPerHour,
+			MaximumSlots:           maxSlots,
 		}
 	}
 	sectors := make([]simSector, 0, len(sectorByID))
@@ -372,6 +371,13 @@ func fetchSimulatorData(id uint64) (*models.VATSIMEvent, *models.SlotRevision, e
 		Preload("RouteSegments.Locations.Waypoint").
 		Preload("RouteSegments.ProvidedFacilityProgression").
 		First(&event, id)
+	if result.Error != nil {
+		return nil, nil, fiber.NewError(fiber.StatusNotFound, "event not found")
+	}
+
+	var allSectors []models.Sector
+	database.DB.Where("event_id = ? OR event_id IS NULL", id).Find(&allSectors)
+	event.Sectors = allSectors
 	if result.Error != nil {
 		return nil, nil, fiber.NewError(fiber.StatusNotFound, "event not found")
 	}

@@ -369,7 +369,7 @@ func ChartsSectors(c fiber.Ctx) error {
 
 		result = append(result, sectorEntry{
 			Identifier:              s.Identifier,
-			Datasource:              "simulation",
+			Datasource:              s.Datasource,
 			MaxAcPerHour:            s.MaximumAircraftPerHour,
 			HasTimings:              hasTimings,
 			TotalSlots:              len(perSlot),
@@ -554,7 +554,7 @@ func ChartsSectorBucketed(c fiber.Ctx) error {
 
 	return c.JSON(fiber.Map{
 		"identifier":              identifier,
-		"datasource":              "simulation",
+		"datasource":              sector.Datasource,
 		"maxAcPerHour":            sector.MaximumAircraftPerHour,
 		"hasTimings":              hasTimings,
 		"totalSlots":              len(perSlot),

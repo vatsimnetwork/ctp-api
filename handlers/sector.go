@@ -148,6 +148,7 @@ func PatchSectorCapacity(c fiber.Ctx) error {
 
 	var input struct {
 		MaximumAircraftPerHour *uint16 `json:"maximumAircraftPerHour"`
+		Datasource             *string  `json:"datasource"`
 	}
 	if err := c.Bind().JSON(&input); err != nil {
 		return fiber.NewError(fiber.StatusBadRequest, err.Error())
@@ -155,6 +156,11 @@ func PatchSectorCapacity(c fiber.Ctx) error {
 
 	if input.MaximumAircraftPerHour != nil {
 		if err := database.DB.Model(&existing).UpdateColumn("maximum_aircraft_per_hour", *input.MaximumAircraftPerHour).Error; err != nil {
+			return fiber.NewError(fiber.StatusInternalServerError, err.Error())
+		}
+	}
+	if input.Datasource != nil {
+		if err := database.DB.Model(&existing).UpdateColumn("datasource", *input.Datasource).Error; err != nil {
 			return fiber.NewError(fiber.StatusInternalServerError, err.Error())
 		}
 	}

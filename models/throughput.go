@@ -4,7 +4,7 @@ import "time"
 
 type ThroughputPoint struct {
 	ID                     uint   `gorm:"primaryKey" json:"id"`
-	Identifier             string `gorm:"not null" json:"identifier"`
+	Identifier             string `gorm:"not null;uniqueIndex" json:"identifier"`
 	MaximumAircraftPerHour uint16 `gorm:"default:65535" json:"maximumAircraftPerHour"`
 }
 
