@@ -85,6 +85,7 @@ func main() {
 	api.Get("/events/:id/slots/window", handlers.GetSlotsWindow)
 	api.Get("/events/:id/charts/departure-airports", handlers.ChartsDepartureAirports)
 	api.Get("/events/:id/charts/sectors", handlers.ChartsSectors)
+	api.Get("/events/:id/charts/sector/:identifier/bucketed", handlers.ChartsSectorBucketed)
 	api.Get("/events/:id/charts/sector/:identifier/fine", handlers.ChartsSectorFine)
 	api.Get("/events/:id/charts/arrival-airports", handlers.ChartsArrivalAirports)
 	api.Get("/events/:id/charts/arrival/:identifier/fine", handlers.ChartsArrivalFine)

@@ -208,10 +208,17 @@ func ChartsSectors(c fiber.Ctx) error {
 	}
 	type sectorEntry struct {
 		Identifier              string        `json:"identifier"`
+		Datasource              string        `json:"datasource"`
 		MaxAcPerHour            uint16        `json:"maxAcPerHour"`
 		HasTimings              bool          `json:"hasTimings"`
 		TotalSlots              int           `json:"totalSlots"`
 		AvgDwellMinutes         float64       `json:"avgDwellMinutes"`
+		Peak                    int           `json:"peak"`
+		PeakLabel               string        `json:"peakLabel"`
+		PeakRef                 int           `json:"peakRef"`
+		TotalPeak               int           `json:"totalPeak"`
+		TotalPeakLabel          string        `json:"totalPeakLabel"`
+		TotalRef                int           `json:"totalRef"`
 		EstimatedMaxOccupancy   int           `json:"estimatedMaxOccupancy"`
 		EstimatedTotalOccupancy int           `json:"estimatedTotalOccupancy"`
 		Buckets                 []bucketEntry `json:"buckets"`
@@ -333,6 +340,10 @@ func ChartsSectors(c fiber.Ctx) error {
 		avgDwellMinutes := 0.0
 		estimatedMaxOccupancy := 0
 		estimatedTotalOccupancy := 0
+		peak := 0
+		peakLabel := ""
+		totalPeak := 0
+		totalPeakLabel := ""
 		if hasTimings && len(perSlot) > 0 {
 			totalDwell := 0
 			for _, r := range perSlot {
@@ -340,20 +351,35 @@ func ChartsSectors(c fiber.Ctx) error {
 			}
 			avgDwellMinutes = math.Round(float64(totalDwell)/float64(len(perSlot))*10) / 10
 			if s.MaximumAircraftPerHour > 0 && s.MaximumAircraftPerHour < 65535 {
-				// Max occupancy (instantaneous): λ × W / 60
 				estimatedMaxOccupancy = int(math.Round(float64(s.MaximumAircraftPerHour) * avgDwellMinutes / 60.0))
-				// Total occupancy (unique aircraft in any 20-min window): λ × (W + 20) / 60
-				// = steady-state occupancy at window start + new arrivals during the window.
 				estimatedTotalOccupancy = int(math.Round(float64(s.MaximumAircraftPerHour) * (avgDwellMinutes + 20) / 60.0))
+			}
+		}
+
+		for _, b := range buckets {
+			if b.PeakCount > peak {
+				peak = b.PeakCount
+				peakLabel = b.Label
+			}
+			if b.UniqueCount > totalPeak {
+				totalPeak = b.UniqueCount
+				totalPeakLabel = b.Label
 			}
 		}
 
 		result = append(result, sectorEntry{
 			Identifier:              s.Identifier,
+			Datasource:              "simulation",
 			MaxAcPerHour:            s.MaximumAircraftPerHour,
 			HasTimings:              hasTimings,
 			TotalSlots:              len(perSlot),
 			AvgDwellMinutes:         avgDwellMinutes,
+			Peak:                    peak,
+			PeakLabel:               peakLabel,
+			PeakRef:                 estimatedMaxOccupancy,
+			TotalPeak:               totalPeak,
+			TotalPeakLabel:          totalPeakLabel,
+			TotalRef:                estimatedTotalOccupancy,
 			EstimatedMaxOccupancy:   estimatedMaxOccupancy,
 			EstimatedTotalOccupancy: estimatedTotalOccupancy,
 			Buckets:                 buckets,
@@ -374,7 +400,178 @@ func ChartsSectors(c fiber.Ctx) error {
 	})
 }
 
-// ChartsArrivalAirports godoc
+func ChartsSectorBucketed(c fiber.Ctx) error {
+	id, err := strconv.ParseUint(c.Params("id"), 10, 64)
+	if err != nil {
+		return fiber.NewError(fiber.StatusBadRequest, "invalid event id")
+	}
+	identifier := c.Params("identifier")
+
+	var event models.VATSIMEvent
+	if err := database.DB.First(&event, id).Error; err != nil {
+		return fiber.NewError(fiber.StatusNotFound, "event not found")
+	}
+
+	revision, err := findLatestRevisionWithSlots(id)
+	if err != nil {
+		return err
+	}
+	if revision == nil {
+		return c.JSON(fiber.Map{
+			"identifier":              identifier,
+			"datasource":              "",
+			"maxAcPerHour":            0,
+			"hasTimings":              false,
+			"totalSlots":              0,
+			"avgDwellMinutes":         0,
+			"estimatedMaxOccupancy":   0,
+			"estimatedTotalOccupancy": 0,
+			"buckets":                 []fiber.Map{},
+		})
+	}
+
+	var sector models.Sector
+	if err := database.DB.Where("identifier = ? AND (event_id = ? OR event_id IS NULL)", identifier, id).First(&sector).Error; err != nil {
+		return fiber.NewError(fiber.StatusNotFound, "sector not found")
+	}
+
+	var snapshots []models.ThroughputSnapshot
+	if err := database.DB.Where("slot_revision_id = ? AND throughput_point_type = ? AND throughput_point_id = ?",
+		revision.ID, "sector", sector.ID).
+		Find(&snapshots).Error; err != nil {
+		return err
+	}
+
+	type bucketEntry struct {
+		Label       string `json:"label"`
+		PeakCount   int    `json:"peakCount"`
+		UniqueCount int    `json:"uniqueCount"`
+	}
+
+	syncBase := event.Date.UTC()
+	if tod := event.DepartureTimeWindowOffsetSynchronizationTimeOfDay; tod != "" {
+		var h, m int
+		fmt.Sscanf(tod, "%d:%d", &h, &m)
+		syncBase = syncBase.Add(time.Duration(h)*time.Hour + time.Duration(m)*time.Minute)
+	}
+
+	analysisResolution := int(event.SimulationAnalysisResolutionInMinutes)
+	if analysisResolution == 0 {
+		analysisResolution = 2
+	}
+
+	hasTimings := len(snapshots) > 0
+
+	tickSlots := map[int]map[uint]bool{}
+	for _, sn := range snapshots {
+		if tickSlots[sn.MinuteOffset] == nil {
+			tickSlots[sn.MinuteOffset] = map[uint]bool{}
+		}
+		tickSlots[sn.MinuteOffset][sn.SlotID] = true
+	}
+
+	bucketPeak := map[int]int{}
+	bucketUnique := map[int]map[uint]bool{}
+	for offset, slots := range tickSlots {
+		bucket := floorDivCharts(offset, 20)
+		if count := len(slots); count > bucketPeak[bucket] {
+			bucketPeak[bucket] = count
+		}
+		if bucketUnique[bucket] == nil {
+			bucketUnique[bucket] = map[uint]bool{}
+		}
+		for id := range slots {
+			bucketUnique[bucket][id] = true
+		}
+	}
+
+	var buckets []bucketEntry
+	if hasTimings {
+		minBucket, maxBucket := int(^uint(0)>>1), -int(^uint(0)>>1)-1
+		for b := range bucketPeak {
+			if b < minBucket {
+				minBucket = b
+			}
+			if b > maxBucket {
+				maxBucket = b
+			}
+		}
+		for b := minBucket; b <= maxBucket; b++ {
+			label := syncBase.Add(time.Duration(b*20) * time.Minute).UTC().Format("15:04Z")
+			buckets = append(buckets, bucketEntry{
+				Label:       label,
+				PeakCount:   bucketPeak[b],
+				UniqueCount: len(bucketUnique[b]),
+			})
+		}
+	}
+
+	type slotRange struct{ min, max int }
+	perSlot := map[uint]slotRange{}
+	for _, sn := range snapshots {
+		if r, ok := perSlot[sn.SlotID]; ok {
+			if sn.MinuteOffset < r.min {
+				r.min = sn.MinuteOffset
+			}
+			if sn.MinuteOffset > r.max {
+				r.max = sn.MinuteOffset
+			}
+			perSlot[sn.SlotID] = r
+		} else {
+			perSlot[sn.SlotID] = slotRange{sn.MinuteOffset, sn.MinuteOffset}
+		}
+	}
+
+	avgDwellMinutes := 0.0
+	estimatedMaxOccupancy := 0
+	estimatedTotalOccupancy := 0
+	peak := 0
+	peakLabel := ""
+	totalPeak := 0
+	totalPeakLabel := ""
+	if hasTimings && len(perSlot) > 0 {
+		totalDwell := 0
+		for _, r := range perSlot {
+			totalDwell += r.max - r.min + analysisResolution
+		}
+		avgDwellMinutes = math.Round(float64(totalDwell)/float64(len(perSlot))*10) / 10
+		if sector.MaximumAircraftPerHour > 0 && sector.MaximumAircraftPerHour < 65535 {
+			estimatedMaxOccupancy = int(math.Round(float64(sector.MaximumAircraftPerHour) * avgDwellMinutes / 60.0))
+			estimatedTotalOccupancy = int(math.Round(float64(sector.MaximumAircraftPerHour) * (avgDwellMinutes + 20) / 60.0))
+		}
+	}
+
+	for _, b := range buckets {
+		if b.PeakCount > peak {
+			peak = b.PeakCount
+			peakLabel = b.Label
+		}
+		if b.UniqueCount > totalPeak {
+			totalPeak = b.UniqueCount
+			totalPeakLabel = b.Label
+		}
+	}
+
+	return c.JSON(fiber.Map{
+		"identifier":              identifier,
+		"datasource":              "simulation",
+		"maxAcPerHour":            sector.MaximumAircraftPerHour,
+		"hasTimings":              hasTimings,
+		"totalSlots":              len(perSlot),
+		"avgDwellMinutes":        avgDwellMinutes,
+		"peak":                    peak,
+		"peakLabel":               peakLabel,
+		"peakRef":                 estimatedMaxOccupancy,
+		"totalPeak":               totalPeak,
+		"totalPeakLabel":          totalPeakLabel,
+		"totalRef":                estimatedTotalOccupancy,
+		"estimatedMaxOccupancy":   estimatedMaxOccupancy,
+		"estimatedTotalOccupancy": estimatedTotalOccupancy,
+		"buckets":                 buckets,
+	})
+}
+
+// ChartsSectorFine godoc
 //
 //	@Summary	Get arrival airport chart data for an event
 //	@Tags		charts
